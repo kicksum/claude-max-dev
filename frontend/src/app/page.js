@@ -1,0 +1,283 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import * as api from '../lib/api';
+import { marked } from 'marked';
+
+export default function Home() {
+  const [conversations, setConversations] = useState([]);
+  const [activeConversation, setActiveConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [model, setModel] = useState('claude-sonnet-4-20250514');
+  const messagesEndRef = useRef(null);
+
+  const models = [
+    { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5', cost: '$1/$5' },
+    { id: 'claude-sonnet-4-20250514', name: 'Sonnet 4', cost: '$3/$15' },
+    { id: 'claude-opus-4-20250514', name: 'Opus 4', cost: '$15/$75' },
+  ];
+
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  useEffect(() => {
+    if (activeConversation) {
+      loadMessages(activeConversation.id);
+    }
+  }, [activeConversation]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const loadConversations = async () => {
+    try {
+      const data = await api.fetchConversations();
+      setConversations(data);
+      if (data.length > 0 && !activeConversation) {
+        setActiveConversation(data[0]);
+      }
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    }
+  };
+
+  const loadMessages = async (conversationId) => {
+    try {
+      const data = await api.getMessages(conversationId);
+      setMessages(data);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
+  const createNewConversation = async () => {
+    try {
+      const conv = await api.createConversation('New Chat', model);
+      setConversations([conv, ...conversations]);
+      setActiveConversation(conv);
+      setMessages([]);
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+    }
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || !activeConversation || loading) return;
+
+    const userMessage = input.trim();
+    setInput('');
+    setLoading(true);
+
+    // Optimistically add user message
+    const tempUserMsg = {
+      role: 'user',
+      content: userMessage,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, tempUserMsg]);
+
+    try {
+      const response = await api.sendMessage(activeConversation.id, userMessage, model);
+      
+      // Replace temp message with real one and add assistant response
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id);
+        return [...filtered, 
+          { ...tempUserMsg, id: 'user-' + Date.now() },
+          response.message
+        ];
+      });
+
+      // Update conversation in list
+      setActiveConversation(response.conversation);
+      setConversations(prev =>
+        prev.map(c => c.id === response.conversation.id ? response.conversation : c)
+      );
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      alert('Failed to send message: ' + error.message);
+      setMessages(prev => prev.filter(m => m !== tempUserMsg));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteConversation = async (id) => {
+    if (!confirm('Delete this conversation?')) return;
+    try {
+      await api.deleteConversation(id);
+      const filtered = conversations.filter(c => c.id !== id);
+      setConversations(filtered);
+      if (activeConversation?.id === id) {
+        setActiveConversation(filtered[0] || null);
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
+  };
+
+  const formatCost = (cost) => {
+    return `$${Number(cost).toFixed(4)}`;
+  };
+
+  const formatTokens = (tokens) => {
+    return tokens?.toLocaleString() || '0';
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-900 text-gray-100">
+      {/* Sidebar */}
+      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+        <div className="p-4 border-b border-gray-700">
+          <h1 className="text-xl font-bold text-blue-400">Claude Max</h1>
+          <p className="text-xs text-gray-400 mt-1">Unlimited AI Power</p>
+        </div>
+        
+        <div className="p-4">
+          <button
+            onClick={createNewConversation}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition"
+          >
+            + New Chat
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {conversations.map(conv => (
+            <div
+              key={conv.id}
+              onClick={() => setActiveConversation(conv)}
+              className={`p-3 mx-2 my-1 rounded cursor-pointer transition ${
+                activeConversation?.id === conv.id
+                  ? 'bg-gray-700'
+                  : 'hover:bg-gray-700'
+              }`}
+            >
+              <div className="text-sm font-medium truncate">{conv.title}</div>
+              <div className="text-xs text-gray-400 mt-1">
+                {formatCost(conv.total_cost)} • {formatTokens(conv.total_input_tokens + conv.total_output_tokens)} tokens
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteConversation(conv.id);
+                }}
+                className="text-xs text-red-400 hover:text-red-300 mt-1"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4 border-t border-gray-700 text-xs text-gray-400">
+          <div>Model: {models.find(m => m.id === model)?.name}</div>
+          {activeConversation && (
+            <div className="mt-2">
+              <div>Total Cost: {formatCost(activeConversation.total_cost)}</div>
+              <div>Tokens: {formatTokens(activeConversation.total_input_tokens + activeConversation.total_output_tokens)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-gray-800 border-b border-gray-700 p-4 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {activeConversation?.title || 'Select a conversation'}
+            </h2>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
+            >
+              {models.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.cost})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((msg, idx) => (
+            <div
+              key={msg.id || idx}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-3xl rounded-lg p-4 ${
+                  msg.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 border border-gray-700'
+                }`}
+              >
+                <div
+                  className="prose prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{
+                    __html: marked.parse(msg.content || '')
+                  }}
+                />
+                {msg.role === 'assistant' && msg.cost > 0 && (
+                  <div className="text-xs text-gray-400 mt-2 pt-2 border-t border-gray-700">
+                    {formatCost(msg.cost)} • {formatTokens(msg.input_tokens)}↑ / {formatTokens(msg.output_tokens)}↓
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <div className="flex space-x-2">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="bg-gray-800 border-t border-gray-700 p-4">
+          <form onSubmit={handleSendMessage} className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Message Claude..."
+              disabled={loading || !activeConversation}
+              className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={loading || !activeConversation || !input.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
