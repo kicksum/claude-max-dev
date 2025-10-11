@@ -57,9 +57,9 @@ router.post('/', async (req, res, next) => {
       conversationId,
       'assistant',
       response.content,
+      response.cost,
       response.inputTokens,
-      response.outputTokens,
-      response.cost
+      response.outputTokens
     );
 
     // Get updated conversation stats

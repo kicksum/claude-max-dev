@@ -49,12 +49,12 @@ async function deleteConversation(id) {
   await db.query('DELETE FROM conversations WHERE id = $1', [id]);
 }
 
-async function saveMessage(conversationId, role, content, model, cost, inputTokens, outputTokens) {
+async function saveMessage(conversationId, role, content, cost, inputTokens, outputTokens) {
   const result = await db.query(
-    `INSERT INTO messages (conversation_id, role, content, model, cost, input_tokens, output_tokens)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO messages (conversation_id, role, content, cost, input_tokens, output_tokens)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [conversationId, role, content, model, cost, inputTokens, outputTokens]
+    [conversationId, role, content, cost, inputTokens, outputTokens]
   );
   
   // Update conversation totals
