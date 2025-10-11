@@ -1,16 +1,18 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: max_dev_db
+    container_name: max_db
     environment:
-      POSTGRES_DB: claude_max_dev
+      POSTGRES_DB: claude_max
       POSTGRES_USER: claude
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORW:-ThisISverySecure!}
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5433:5432"
+      - "5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U claude"]
@@ -20,20 +22,20 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: max_dev_cache
+    container_name: max_cache
     command: redis-server --appendonly yes --maxmemory 256mb
     volumes:
-      - redis_dev_data:/data
+      - redis_data:/data
     ports:
-      - "6380:6379"
+      - "6379:6379"
     restart: unless-stopped
 
   backend:
     build: ./backend
-    container_name: max_dev_api
+    container_name: max_api
     environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://claude:${DB_PASSWORD}@postgres:5432/claude_max_dev
+      NODE_ENV: production
+      DATABASE_URL: postgresql://claude:${DB_PASSWORD:-ThisISverySecure!}@postgres:5432/claude_max
       REDIS_URL: redis://redis:6379
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       PORT: 8000
@@ -41,7 +43,7 @@ services:
       - ./backend:/app
       - /app/node_modules
     ports:
-      - "8001:8000"
+      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,23 +51,23 @@ services:
 
   frontend:
     build: ./frontend
-    container_name: max_dev_web
+    container_name: max_web
     environment:
-      NEXT_PUBLIC_API_URL: http://192.168.1.8:8001
+      NEXT_PUBLIC_API_URL: http://192.168.1.8:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
     ports:
-      - "3001:3000"
+      - "3000:3000"
     depends_on:
       - backend
     restart: unless-stopped
 
 volumes:
-  postgres_dev_data:
-  redis_dev_data:
+  postgres_data:
+  redis_data:
 
 networks:
   default:
-    name: max_dev_network
+    name: max_network
