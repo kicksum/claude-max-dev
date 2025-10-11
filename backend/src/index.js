@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const conversationRoutes = require('./routes/conversations');
 const messageRoutes = require('./routes/messages');
+const projectRoutes = require('./routes/projects');  // ← ADD THIS LINE
 const { initDatabase } = require('./config/database');
 
 const app = express();
@@ -20,6 +21,7 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/projects', projectRoutes);  // ← ADD THIS LINE
 
 // Error handler
 app.use((err, req, res, next) => {

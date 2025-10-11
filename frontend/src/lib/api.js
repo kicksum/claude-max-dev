@@ -1,4 +1,4 @@
-const API_URL = 'http://192.168.1.8:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8000';
 
 export async function fetchConversations() {
   const res = await fetch(`${API_URL}/api/conversations`);
@@ -49,5 +49,50 @@ export async function sendMessage(conversationId, content, model) {
 export async function searchConversations(query) {
   const res = await fetch(`${API_URL}/api/conversations/search/${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error('Failed to search');
+  return res.json();
+}
+// ==================== PROJECTS ====================
+
+export async function fetchProjects() {
+  const res = await fetch(`${API_URL}/api/projects`);
+  if (!res.ok) throw new Error('Failed to fetch projects');
+  return res.json();
+}
+
+export async function createProject(name, description, color = '#3B82F6', icon = '📁') {
+  const res = await fetch(`${API_URL}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, color, icon }),
+  });
+  if (!res.ok) throw new Error('Failed to create project');
+  return res.json();
+}
+
+export async function updateProject(id, updates) {
+  const res = await fetch(`${API_URL}/api/projects/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error('Failed to update project');
+  return res.json();
+}
+
+export async function deleteProject(id) {
+  const res = await fetch(`${API_URL}/api/projects/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to delete project');
+  return res.json();
+}
+
+export async function assignConversationToProject(conversationId, projectId) {
+  const res = await fetch(`${API_URL}/api/conversations/${conversationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw new Error('Failed to assign conversation to project');
   return res.json();
 }
