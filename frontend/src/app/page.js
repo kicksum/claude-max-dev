@@ -14,7 +14,15 @@ export default function Home() {
   const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const [totalMatches, setTotalMatches] = useState(0);
+  
   const messagesEndRef = useRef(null);
+  const messageRefs = useRef({});
 
   const models = [
     { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5', cost: '$1/$5' },
@@ -30,12 +38,26 @@ export default function Home() {
   useEffect(() => {
     if (activeConversation) {
       loadMessages(activeConversation.id);
+      // Reset search when switching conversations
+      setSearchQuery('');
+      setSearchActive(false);
+      setCurrentMatchIndex(0);
+      setTotalMatches(0);
     }
   }, [activeConversation]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Handle search highlighting and navigation
+  useEffect(() => {
+    if (searchQuery.trim() && searchActive) {
+      highlightMatches();
+    } else {
+      clearHighlights();
+    }
+  }, [searchQuery, searchActive, messages, currentMatchIndex]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,7 +122,6 @@ export default function Home() {
   const handleAssignToProject = async (conversationId, projectId) => {
     try {
       await api.assignConversationToProject(conversationId, projectId);
-      // Reload conversations to get updated project_id
       await loadConversations();
     } catch (error) {
       console.error('Failed to assign conversation:', error);
@@ -159,6 +180,153 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Failed to delete conversation:', error);
+    }
+  };
+
+  // Search functions
+  const highlightMatches = () => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return;
+
+    let matchCount = 0;
+    const messagesContainer = document.getElementById('messages-container');
+    if (!messagesContainer) return;
+
+    // Remove existing highlights
+    clearHighlights();
+
+    // Find and highlight all matches
+    const walker = document.createTreeWalker(
+      messagesContainer,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          // Skip if parent is already a mark element or script/style
+          const parent = node.parentElement;
+          if (!parent || parent.tagName === 'MARK' || parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const nodesToReplace = [];
+    let node;
+    while (node = walker.nextNode()) {
+      const text = node.textContent || '';
+      const lowerText = text.toLowerCase();
+      if (lowerText.includes(query)) {
+        nodesToReplace.push(node);
+      }
+    }
+
+    nodesToReplace.forEach(node => {
+      const text = node.textContent || '';
+      const lowerText = text.toLowerCase();
+      const parts = [];
+      let lastIndex = 0;
+      let index = lowerText.indexOf(query);
+
+      while (index !== -1) {
+        // Add text before match
+        if (index > lastIndex) {
+          parts.push(document.createTextNode(text.substring(lastIndex, index)));
+        }
+
+        // Add highlighted match
+        const mark = document.createElement('mark');
+        mark.className = matchCount === currentMatchIndex 
+          ? 'search-highlight-current bg-yellow-400 text-black px-0.5 rounded font-semibold'
+          : 'search-highlight bg-yellow-200 text-black px-0.5 rounded';
+        mark.textContent = text.substring(index, index + query.length);
+        mark.dataset.matchIndex = matchCount;
+        parts.push(mark);
+
+        matchCount++;
+        lastIndex = index + query.length;
+        index = lowerText.indexOf(query, lastIndex);
+      }
+
+      // Add remaining text
+      if (lastIndex < text.length) {
+        parts.push(document.createTextNode(text.substring(lastIndex)));
+      }
+
+      // Replace the text node with highlighted parts
+      const parent = node.parentElement;
+      if (parent) {
+        const fragment = document.createDocumentFragment();
+        parts.forEach(part => fragment.appendChild(part));
+        parent.replaceChild(fragment, node);
+      }
+    });
+
+    setTotalMatches(matchCount);
+
+    // Scroll to current match
+    if (matchCount > 0) {
+      scrollToMatch(currentMatchIndex);
+    }
+  };
+
+  const clearHighlights = () => {
+    const highlights = document.querySelectorAll('.search-highlight, .search-highlight-current');
+    highlights.forEach(mark => {
+      const parent = mark.parentElement;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(mark.textContent || ''), mark);
+        parent.normalize(); // Merge adjacent text nodes
+      }
+    });
+    setTotalMatches(0);
+  };
+
+  const scrollToMatch = (index) => {
+    const highlights = document.querySelectorAll('.search-highlight, .search-highlight-current');
+    if (highlights[index]) {
+      highlights[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    setCurrentMatchIndex(0);
+    if (value.trim()) {
+      setSearchActive(true);
+    } else {
+      setSearchActive(false);
+    }
+  };
+
+  const navigateToNextMatch = () => {
+    if (totalMatches > 0) {
+      const nextIndex = (currentMatchIndex + 1) % totalMatches;
+      setCurrentMatchIndex(nextIndex);
+      scrollToMatch(nextIndex);
+    }
+  };
+
+  const navigateToPrevMatch = () => {
+    if (totalMatches > 0) {
+      const prevIndex = currentMatchIndex === 0 ? totalMatches - 1 : currentMatchIndex - 1;
+      setCurrentMatchIndex(prevIndex);
+      scrollToMatch(prevIndex);
+    }
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        navigateToPrevMatch();
+      } else {
+        navigateToNextMatch();
+      }
+    } else if (e.key === 'Escape') {
+      setSearchQuery('');
+      setSearchActive(false);
     }
   };
 
@@ -361,59 +529,137 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Main Chat Area - UNCHANGED */}
+      {/* Main Chat Area - REDESIGNED! */}
       <div className="flex-1 flex flex-col">
-        <div className="bg-gray-800 border-b border-gray-700 p-4 flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-semibold">
-              {activeConversation?.title || 'Select a conversation'}
-            </h2>
+        {/* Header with Search */}
+        <div className="bg-gray-800 border-b border-gray-700 p-4">
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h2 className="text-xl font-semibold">
+                {activeConversation?.title || 'Select a conversation'}
+              </h2>
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
+              >
+                {models.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.cost})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
-            >
-              {models.map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.cost})
-                </option>
-              ))}
-            </select>
-          </div>
+
+          {/* Search Bar */}
+          {messages.length > 0 && (
+            <div className="flex items-center gap-2 bg-gray-700 rounded-lg p-2">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={handleSearchChange}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search in conversation... (Enter to navigate, Esc to clear)"
+                className="flex-1 bg-transparent border-none focus:outline-none text-sm"
+              />
+              {totalMatches > 0 && (
+                <>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                    {currentMatchIndex + 1} of {totalMatches}
+                  </span>
+                  <button
+                    onClick={navigateToPrevMatch}
+                    className="p-1 hover:bg-gray-600 rounded"
+                    title="Previous match (Shift+Enter)"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={navigateToNextMatch}
+                    className="p-1 hover:bg-gray-600 rounded"
+                    title="Next match (Enter)"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+              {searchQuery && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchActive(false);
+                  }}
+                  className="p-1 hover:bg-gray-600 rounded"
+                  title="Clear search (Esc)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Messages - NEW CLAUDE-STYLE LAYOUT */}
+        <div id="messages-container" className="flex-1 overflow-y-auto">
           {messages.map((msg, idx) => (
             <div
               key={msg.id || idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              ref={el => messageRefs.current[msg.id || idx] = el}
+              className={`border-b border-gray-800 ${
+                msg.role === 'user' 
+                  ? 'bg-gray-800/50' 
+                  : 'bg-gray-900'
+              }`}
             >
-              <div
-                className={`max-w-3xl rounded-lg p-4 ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 border border-gray-700'
-                }`}
-              >
-                <div
-                  className="prose prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{
-                    __html: marked.parse(msg.content || '')
-                  }}
-                />
-                {msg.role === 'assistant' && msg.cost > 0 && (
-                  <div className="text-xs text-gray-400 mt-2 pt-2 border-t border-gray-700">
-                    {formatCost(msg.cost)} • {formatTokens(msg.input_tokens)}↑ / {formatTokens(msg.output_tokens)}↓
+              <div className="max-w-[%90] mx-auto px-6 py-6">
+                {msg.role === 'user' ? (
+                  // User message - bubble on the right
+                  <div className="flex justify-end">
+                    <div className="bg-blue-600 rounded-2xl px-5 py-3 max-w-2xl">
+                      <div className="text-white whitespace-pre-wrap break-words text-xl">
+                        {msg.content}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // Assistant message - full width, flowing
+                  <div className="space-y-4">
+                    <div
+                      className="prose prose-xl prose-invert prose-pre:bg-gray-800 prose-pre:text-gray-100 max-w-none prose-p:leading-relaxed prose-headings:font-semibold"
+                      dangerouslySetInnerHTML={{
+                        __html: marked.parse(msg.content || '')
+                      }}
+                    />
+                    {msg.cost > 0 && (
+                      <div className="flex items-center gap-3 text-xs text-gray-500 pt-2 border-t border-gray-800">
+                        <span>{formatCost(msg.cost)}</span>
+                        <span>•</span>
+                        <span>{formatTokens(msg.input_tokens)} in</span>
+                        <span>•</span>
+                        <span>{formatTokens(msg.output_tokens)} out</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </div>
           ))}
+          
           {loading && (
-            <div className="flex justify-start">
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <div className="border-b border-gray-800 bg-gray-900">
+              <div className="max-w-[%90] mx-auto px-6 py-6">
                 <div className="flex space-x-2">
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
@@ -425,24 +671,27 @@ export default function Home() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Input Area */}
         <div className="bg-gray-800 border-t border-gray-700 p-4">
-          <form onSubmit={handleSendMessage} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Message Claude..."
-              disabled={loading || !activeConversation}
-              className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={loading || !activeConversation || !input.trim()}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Send
-            </button>
-          </form>
+          <div className="max-w-[%90] mx-auto">
+            <form onSubmit={handleSendMessage} className="flex gap-2">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Message Claude..."
+                disabled={loading || !activeConversation}
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={loading || !activeConversation || !input.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
