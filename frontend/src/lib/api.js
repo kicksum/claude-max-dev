@@ -96,3 +96,36 @@ export async function assignConversationToProject(conversationId, projectId) {
   if (!res.ok) throw new Error('Failed to assign conversation to project');
   return res.json();
 }
+// Update conversation title
+export async function updateConversationTitle(conversationId, title) {
+  const response = await fetch(`${API_URL}/api/conversations/${conversationId}/title`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update conversation title');
+  }
+
+  return response.json();
+}
+
+// Generate conversation title from first message
+export async function generateConversationTitle(conversationId, content) {
+  const response = await fetch(`${API_URL}/api/conversations/${conversationId}/generate-title`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to generate conversation title');
+  }
+
+  return response.json();
+}

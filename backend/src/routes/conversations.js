@@ -1,71 +1,98 @@
 const express = require('express');
 const router = express.Router();
 const conversationService = require('../services/conversation.service');
+const claudeService = require('../services/claude.service');
 
 // Get all conversations
-router.get('/', async (req, res, next) => {
+router.get('/', async (req, res) => {
   try {
     const conversations = await conversationService.getAllConversations();
     res.json(conversations);
   } catch (error) {
-    next(error);
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Create new conversation
-router.post('/', async (req, res, next) => {
+router.post('/', async (req, res) => {
   try {
     const { title, model } = req.body;
-    const conversation = await conversationService.createConversation(title, model);
-    res.status(201).json(conversation);
+    const conversation = await conversationService.createConversation(title || 'New Chat', model);
+    res.json(conversation);
   } catch (error) {
-    next(error);
+    console.error('Error creating conversation:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Get specific conversation
-router.get('/:id', async (req, res, next) => {
+// Update conversation title
+router.put('/:id/title', async (req, res) => {
   try {
-    const conversation = await conversationService.getConversation(req.params.id);
-    if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
+    const { id } = req.params;
+    const { title } = req.body;
+    
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
     }
+    
+    const conversation = await conversationService.updateConversation(id, { title: title.trim() });
     res.json(conversation);
   } catch (error) {
-    next(error);
+    console.error('Error updating conversation title:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Update conversation
-router.patch('/:id', async (req, res, next) => {
+// Update conversation (including project assignment)
+router.put('/:id', async (req, res) => {
   try {
-    const conversation = await conversationService.updateConversation(req.params.id, req.body);
-    if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
+    const { id } = req.params;
+    const updates = req.body;
+    const conversation = await conversationService.updateConversation(id, updates);
     res.json(conversation);
   } catch (error) {
-    next(error);
+    console.error('Error updating conversation:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Delete conversation
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', async (req, res) => {
   try {
-    await conversationService.deleteConversation(req.params.id);
+    const { id } = req.params;
+    await conversationService.deleteConversation(id);
     res.json({ success: true });
   } catch (error) {
-    next(error);
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Search conversations
-router.get('/search/:query', async (req, res, next) => {
+// Generate title from message content
+router.post('/:id/generate-title', async (req, res) => {
   try {
-    const results = await conversationService.searchConversations(req.params.query);
-    res.json(results);
+    const { id } = req.params;
+    const { content } = req.body;
+    
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+    
+    // Use Claude to generate a short, descriptive title
+    const titlePrompt = `Generate a very short, concise title (3-6 words max) for a conversation that starts with: "${content.substring(0, 200)}..."
+
+Reply with ONLY the title, no quotes, no explanation.`;
+    
+    const title = await claudeService.generateTitle(titlePrompt);
+    
+    // Update the conversation with the new title
+    const conversation = await conversationService.updateConversation(id, { title });
+    
+    res.json(conversation);
   } catch (error) {
-    next(error);
+    console.error('Error generating title:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

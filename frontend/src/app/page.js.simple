@@ -21,16 +21,8 @@ export default function Home() {
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
   
-  // Title editing state
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState('');
-  const [editingSidebarId, setEditingSidebarId] = useState(null);
-  const [editedSidebarTitle, setEditedSidebarTitle] = useState('');
-  
   const messagesEndRef = useRef(null);
   const messageRefs = useRef({});
-  const titleInputRef = useRef(null);
-  const sidebarInputRef = useRef(null);
 
   const models = [
     { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5', cost: '$1/$5' },
@@ -64,21 +56,6 @@ export default function Home() {
       clearHighlights();
     }
   }, [searchQuery, searchActive, messages, currentMatchIndex]);
-
-  // Focus input when editing starts
-  useEffect(() => {
-    if (editingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-      titleInputRef.current.select();
-    }
-  }, [editingTitle]);
-
-  useEffect(() => {
-    if (editingSidebarId && sidebarInputRef.current) {
-      sidebarInputRef.current.focus();
-      sidebarInputRef.current.select();
-    }
-  }, [editingSidebarId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -147,88 +124,6 @@ export default function Home() {
     } catch (error) {
       console.error('Failed to assign conversation:', error);
       alert('Failed to assign conversation to project');
-    }
-  };
-
-  // Title editing functions
-  const startEditingTitle = () => {
-    if (!activeConversation) return;
-    setEditedTitle(activeConversation.title);
-    setEditingTitle(true);
-  };
-
-  const cancelEditingTitle = () => {
-    setEditingTitle(false);
-    setEditedTitle('');
-  };
-
-  const saveTitle = async () => {
-    if (!activeConversation || !editedTitle.trim()) {
-      cancelEditingTitle();
-      return;
-    }
-
-    try {
-      const updated = await api.updateConversationTitle(activeConversation.id, editedTitle.trim());
-      setActiveConversation(updated);
-      setConversations(prev =>
-        prev.map(c => c.id === updated.id ? updated : c)
-      );
-      setEditingTitle(false);
-    } catch (error) {
-      console.error('Failed to update title:', error);
-      alert('Failed to update title');
-    }
-  };
-
-  const handleTitleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveTitle();
-    } else if (e.key === 'Escape') {
-      cancelEditingTitle();
-    }
-  };
-
-  // Sidebar title editing
-  const startEditingSidebarTitle = (conv, e) => {
-    e.stopPropagation();
-    setEditingSidebarId(conv.id);
-    setEditedSidebarTitle(conv.title);
-  };
-
-  const cancelEditingSidebarTitle = () => {
-    setEditingSidebarId(null);
-    setEditedSidebarTitle('');
-  };
-
-  const saveSidebarTitle = async (convId) => {
-    if (!editedSidebarTitle.trim()) {
-      cancelEditingSidebarTitle();
-      return;
-    }
-
-    try {
-      const updated = await api.updateConversationTitle(convId, editedSidebarTitle.trim());
-      setConversations(prev =>
-        prev.map(c => c.id === updated.id ? updated : c)
-      );
-      if (activeConversation?.id === convId) {
-        setActiveConversation(updated);
-      }
-      setEditingSidebarId(null);
-    } catch (error) {
-      console.error('Failed to update title:', error);
-      alert('Failed to update title');
-    }
-  };
-
-  const handleSidebarTitleKeyDown = (convId, e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveSidebarTitle(convId);
-    } else if (e.key === 'Escape') {
-      cancelEditingSidebarTitle();
     }
   };
 
@@ -542,34 +437,7 @@ export default function Home() {
                         : 'hover:bg-gray-700'
                     }`}
                   >
-                    {editingSidebarId === conv.id ? (
-                      <input
-                        ref={sidebarInputRef}
-                        type="text"
-                        value={editedSidebarTitle}
-                        onChange={(e) => setEditedSidebarTitle(e.target.value)}
-                        onKeyDown={(e) => handleSidebarTitleKeyDown(conv.id, e)}
-                        onBlur={() => saveSidebarTitle(conv.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
-                      />
-                    ) : (
-                      <div 
-                        className="text-sm font-medium truncate flex items-center gap-1 group"
-                        onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
-                      >
-                        <span className="flex-1 truncate">{conv.title}</span>
-                        <button
-                          onClick={(e) => startEditingSidebarTitle(conv, e)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Rename"
-                        >
-                          <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
+                    <div className="text-sm font-medium truncate">{conv.title}</div>
                     <div className="text-xs text-gray-400 mt-1">
                       {formatCost(conv.total_cost)} • {formatTokens(conv.total_input_tokens + conv.total_output_tokens)} tokens
                     </div>
@@ -620,34 +488,7 @@ export default function Home() {
                       : 'hover:bg-gray-700'
                   }`}
                 >
-                  {editingSidebarId === conv.id ? (
-                    <input
-                      ref={sidebarInputRef}
-                      type="text"
-                      value={editedSidebarTitle}
-                      onChange={(e) => setEditedSidebarTitle(e.target.value)}
-                      onKeyDown={(e) => handleSidebarTitleKeyDown(conv.id, e)}
-                      onBlur={() => saveSidebarTitle(conv.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
-                    />
-                  ) : (
-                    <div 
-                      className="text-sm font-medium truncate flex items-center gap-1 group"
-                      onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
-                    >
-                      <span className="flex-1 truncate">{conv.title}</span>
-                      <button
-                        onClick={(e) => startEditingSidebarTitle(conv, e)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Rename"
-                      >
-                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
+                  <div className="text-sm font-medium truncate">{conv.title}</div>
                   <div className="text-xs text-gray-400 mt-1">
                     {formatCost(conv.total_cost)} • {formatTokens(conv.total_input_tokens + conv.total_output_tokens)} tokens
                   </div>
@@ -698,32 +539,9 @@ export default function Home() {
         {/* Header with Search */}
         <div className="bg-gray-800 border-b border-gray-700 p-4">
           <div className="flex justify-between items-center mb-3">
-            <div className="flex items-center gap-2 flex-1">
-              {editingTitle ? (
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  onKeyDown={handleTitleKeyDown}
-                  onBlur={saveTitle}
-                  className="flex-1 bg-gray-700 border border-blue-500 rounded px-3 py-1 text-lg font-semibold"
-                />
-              ) : (
-                <h2 
-                  className="text-lg font-semibold cursor-pointer hover:text-blue-400 transition flex items-center gap-2 group"
-                  onClick={startEditingTitle}
-                  title="Click to rename"
-                >
-                  {activeConversation?.title || 'Select a conversation'}
-                  {activeConversation && (
-                    <svg className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  )}
-                </h2>
-              )}
-            </div>
+            <h2 className="text-lg font-semibold">
+              {activeConversation?.title || 'Select a conversation'}
+            </h2>
             <div className="flex gap-2">
               <select
                 value={model}
