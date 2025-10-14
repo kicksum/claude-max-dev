@@ -711,7 +711,7 @@ export default function Home() {
                 />
               ) : (
                 <h2 
-                  className="text-lg font-semibold cursor-pointer hover:text-blue-400 transition flex items-center gap-2 group"
+                  className="text-xl font-semibold cursor-pointer hover:text-blue-400 transition flex items-center gap-2 group"
                   onClick={startEditingTitle}
                   title="Click to rename"
                 >
