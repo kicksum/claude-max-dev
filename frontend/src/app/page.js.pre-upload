@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import * as api from '../lib/api';
 import { marked } from 'marked';
-import FileUpload from '../components/FileUpload';
 
 export default function Home() {
   const [conversations, setConversations] = useState([]);
@@ -15,23 +14,19 @@ export default function Home() {
   const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-
-  // File upload state
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [uploadedFileIds, setUploadedFileIds] = useState([]);
-
+  
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
-
+  
   // Title editing state
   const [editingTitle, setEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [editingSidebarId, setEditingSidebarId] = useState(null);
   const [editedSidebarTitle, setEditedSidebarTitle] = useState('');
-
+  
   const messagesEndRef = useRef(null);
   const messageRefs = useRef({});
   const titleInputRef = useRef(null);
@@ -133,7 +128,7 @@ export default function Home() {
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
-
+    
     try {
       const project = await api.createProject(newProjectName.trim());
       setProjects([...projects, project]);
@@ -237,75 +232,28 @@ export default function Home() {
     }
   };
 
-  // File handling functions
-  const handleFilesSelected = async (files) => {
-    setSelectedFiles(prev => [...prev, ...files]);
-  };
-
-  const handleRemoveFile = (index) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-    setUploadedFileIds(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const uploadFiles = async () => {
-    if (selectedFiles.length === 0) return [];
-
-    const formData = new FormData();
-    selectedFiles.forEach(file => {
-      formData.append('files', file);
-    });
-
-    try {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-    const response = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('File upload failed');
-      }
-
-      const data = await response.json();
-      return data.files.map(f => f.id);
-    } catch (error) {
-      console.error('Upload error:', error);
-      throw error;
-    }
-  };
-
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || !activeConversation || loading) return;
 
     const userMessage = input.trim();
     const isFirstMessage = messages.length === 0;
+    setInput('');
     setLoading(true);
 
+    const tempUserMsg = {
+      role: 'user',
+      content: userMessage,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, tempUserMsg]);
+
     try {
-      // Upload files first if any
-      let fileIds = [];
-      if (selectedFiles.length > 0) {
-        fileIds = await uploadFiles();
-        setUploadedFileIds(fileIds);
-      }
-
-      const tempUserMsg = {
-        role: 'user',
-        content: userMessage,
-        created_at: new Date().toISOString(),
-        files: selectedFiles.map(f => ({ original_filename: f.name, mime_type: f.type }))
-      };
+      const response = await api.sendMessage(activeConversation.id, userMessage, model);
       
-      setMessages(prev => [...prev, tempUserMsg]);
-      setInput('');
-      setSelectedFiles([]);
-
-      const response = await api.sendMessage(activeConversation.id, userMessage, model, fileIds);
-
       setMessages(prev => {
         const filtered = prev.filter(m => m.id);
-        return [...filtered,
+        return [...filtered, 
           { ...tempUserMsg, id: 'user-' + Date.now() },
           response.message
         ];
@@ -326,15 +274,15 @@ export default function Home() {
           );
         } catch (titleError) {
           console.error('Failed to generate title:', titleError);
+          // Don't alert user, just log it
         }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
       alert('Failed to send message: ' + error.message);
-      setMessages(prev => prev.filter(m => !m.files || m.id));
+      setMessages(prev => prev.filter(m => m !== tempUserMsg));
     } finally {
       setLoading(false);
-      setUploadedFileIds([]);
     }
   };
 
@@ -401,7 +349,7 @@ export default function Home() {
         }
 
         const mark = document.createElement('mark');
-        mark.className = matchCount === currentMatchIndex
+        mark.className = matchCount === currentMatchIndex 
           ? 'search-highlight-current bg-yellow-400 text-black px-0.5 rounded font-semibold'
           : 'search-highlight bg-yellow-200 text-black px-0.5 rounded';
         mark.textContent = text.substring(index, index + query.length);
@@ -503,7 +451,7 @@ export default function Home() {
   // Group conversations by project
   const conversationsByProject = {};
   const uncategorized = [];
-
+  
   conversations.forEach(conv => {
     if (conv.project_id) {
       if (!conversationsByProject[conv.project_id]) {
@@ -523,7 +471,7 @@ export default function Home() {
           <h1 className="text-xl font-bold text-blue-400">Claude Max</h1>
           <p className="text-xs text-gray-400 mt-1">Unlimited AI Power</p>
         </div>
-
+        
         <div className="p-4 space-y-2">
           <button
             onClick={createNewConversation}
@@ -531,14 +479,14 @@ export default function Home() {
           >
             + New Chat
           </button>
-
+          
           <button
             onClick={() => setShowNewProject(!showNewProject)}
             className="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition text-sm"
           >
             + New Project
           </button>
-
+          
           {showNewProject && (
             <form onSubmit={handleCreateProject} className="mt-2">
               <input
@@ -576,7 +524,7 @@ export default function Home() {
           {projects.map(project => {
             const projectConvs = conversationsByProject[project.id] || [];
             if (projectConvs.length === 0) return null;
-
+            
             return (
               <div key={project.id} className="mb-2">
                 <div className="px-3 py-2 text-xs font-semibold text-gray-400 flex items-center gap-2">
@@ -606,7 +554,7 @@ export default function Home() {
                         className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
                       />
                     ) : (
-                      <div
+                      <div 
                         className="text-sm font-medium truncate flex items-center gap-1 group"
                         onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
                       >
@@ -655,7 +603,7 @@ export default function Home() {
               </div>
             );
           })}
-
+          
           {/* Uncategorized conversations */}
           {uncategorized.length > 0 && (
             <div className="mb-2">
@@ -684,7 +632,7 @@ export default function Home() {
                       className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
                     />
                   ) : (
-                    <div
+                    <div 
                       className="text-sm font-medium truncate flex items-center gap-1 group"
                       onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
                     >
@@ -762,7 +710,7 @@ export default function Home() {
                   className="flex-1 bg-gray-700 border border-blue-500 rounded px-3 py-1 text-lg font-semibold"
                 />
               ) : (
-                <h2
+                <h2 
                   className="text-xl font-semibold cursor-pointer hover:text-blue-400 transition flex items-center gap-2 group"
                   onClick={startEditingTitle}
                   title="Click to rename"
@@ -855,8 +803,8 @@ export default function Home() {
               key={msg.id || idx}
               ref={el => messageRefs.current[msg.id || idx] = el}
               className={`border-b border-gray-800 ${
-                msg.role === 'user'
-                  ? 'bg-gray-800/50'
+                msg.role === 'user' 
+                  ? 'bg-gray-800/50' 
                   : 'bg-gray-900'
               }`}
             >
@@ -864,15 +812,6 @@ export default function Home() {
                 {msg.role === 'user' ? (
                   <div className="flex justify-end">
                     <div className="bg-blue-600 rounded-2xl px-5 py-3 max-w-2xl">
-                      {msg.files && msg.files.length > 0 && (
-                        <div className="mb-2 flex flex-wrap gap-2">
-                          {msg.files.map((file, fileIdx) => (
-                            <div key={fileIdx} className="text-xs bg-blue-700 rounded px-2 py-1 flex items-center gap-1">
-                              <span>{file.original_filename || file.filename}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                       <div className="text-white whitespace-pre-wrap break-words text-xl">
                         {msg.content}
                       </div>
@@ -900,7 +839,7 @@ export default function Home() {
               </div>
             </div>
           ))}
-
+          
           {loading && (
             <div className="border-b border-gray-800 bg-gray-900">
               <div className="max-w-[90%] mx-auto px-6 py-6">
@@ -918,11 +857,6 @@ export default function Home() {
         {/* Input Area */}
         <div className="bg-gray-800 border-t border-gray-700 p-4">
           <div className="max-w-[90%] mx-auto">
-            <FileUpload
-              onFilesSelected={handleFilesSelected}
-              selectedFiles={selectedFiles}
-              onRemoveFile={handleRemoveFile}
-            />
             <form onSubmit={handleSendMessage} className="flex gap-2">
               <input
                 type="text"

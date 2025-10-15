@@ -40,6 +40,7 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - ./backend/uploads:/app/uploads
     ports:
       - "8001:8000"
     depends_on:

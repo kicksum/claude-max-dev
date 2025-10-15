@@ -36,11 +36,11 @@ export async function getMessages(conversationId) {
   return res.json();
 }
 
-export async function sendMessage(conversationId, content, model, fileIds = []) {
+export async function sendMessage(conversationId, content, model) {
   const res = await fetch(`${API_URL}/api/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId, content, model, fileIds }),
+    body: JSON.stringify({ conversationId, content, model }),
   });
   if (!res.ok) throw new Error('Failed to send message');
   return res.json();

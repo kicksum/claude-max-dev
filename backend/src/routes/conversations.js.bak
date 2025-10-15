@@ -57,19 +57,6 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// PATCH route for compatibility (same as PUT)
-router.patch('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
-    const conversation = await conversationService.updateConversation(id, updates);
-    res.json(conversation);
-  } catch (error) {
-    console.error('Error updating conversation:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Delete conversation
 router.delete('/:id', async (req, res) => {
   try {

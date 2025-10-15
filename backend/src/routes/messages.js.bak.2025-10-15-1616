@@ -77,10 +77,7 @@ router.post('/', async (req, res, next) => {
         [msg.id]
       );
       const messageFiles = filesResult.rows;
-      console.log(`📎 Message ${msg.id} has ${messageFiles.length} files`);
-      if (messageFiles.length > 0) {
-          console.log('📎 Files:', messageFiles.map(f => f.original_filename));
-      }
+
       if (messageFiles.length > 0) {
         // Message has attachments - format as multi-part content
         const contentArray = [];
