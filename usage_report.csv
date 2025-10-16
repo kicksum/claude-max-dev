@@ -1,0 +1,13 @@
+Title,Model,Project,Created,Updated,Cost,Input Tokens,Output Tokens,Total Tokens
+"New Chat",Sonnet 4,"📁 Claude Max Build",10/16/2025,10/16/2025,0.0054,12,356,368
+"New Chat",Sonnet 4,"📁 Claude Max Dev Build",10/15/2025,10/16/2025,0.0021,22,138,160
+"Test Chat",Sonnet 4,"📁 Claude Max Build",10/16/2025,10/16/2025,0.0005,20,92,112
+
+SUMMARY
+Total Conversations,3
+Total Messages,6
+Total Cost,0.0080
+Total Input Tokens,54
+Total Output Tokens,586
+Total Tokens,640
+Report Generated,10/16/2025, 6:44:34 PM

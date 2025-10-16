@@ -346,12 +346,6 @@ router.get('/:id/export', async (req, res) => {
 // Generate global usage report
 router.get('/report/usage', async (req, res) => {
   try {
-    // Helper function to strip emojis from text - CLEAN DATA FOR CSV
-    const stripEmojis = (str) => {
-      if (!str) return str;
-      return str.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F300}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2700}-\u{27BF}]/gu, '').trim();
-    };
-    
     // Get all conversations with stats
     const convsResult = await pool.query(`
       SELECT 
@@ -414,50 +408,65 @@ router.get('/report/usage', async (req, res) => {
       byProject[projectKey].tokens += conv.total_input_tokens + conv.total_output_tokens;
     });
     
-   // Generate CSV report
-   const modelNames = {
-     'claude-3-5-haiku-20241022': 'Haiku 3.5',
-     'claude-sonnet-4-20250514': 'Sonnet 4',
-     'claude-opus-4-20250514': 'Opus 4'
-   };
-   
-   let csv = '';
-   
-   // Header
-   csv += 'Title,Model,Project,Created,Updated,Cost,Input Tokens,Output Tokens,Total Tokens\n';
-   
-   // Data rows - STRIP EMOJIS FROM PROJECT NAMES
-   conversations.forEach(conv => {
-     const title = `"${(conv.title || 'Untitled').replace(/"/g, '""')}"`;
-     const model = modelNames[conv.model] || conv.model || 'Unknown';
-     // STRIP EMOJIS HERE - CLEAN DATA!
-     const project = conv.project_name ? `"${stripEmojis(conv.project_name)}"` : 'Uncategorized';
-     const created = new Date(conv.created_at).toLocaleDateString();
-     const updated = new Date(conv.updated_at).toLocaleDateString();
-     const cost = Number(conv.total_cost).toFixed(4);
-     const inputTokens = conv.total_input_tokens;
-     const outputTokens = conv.total_output_tokens;
-     const totalTokens = inputTokens + outputTokens;
-     
-     csv += `${title},${model},${project},${created},${updated},${cost},${inputTokens},${outputTokens},${totalTokens}\n`;
-   });
-   
-   // Summary
-   csv += '\n';
-   csv += 'SUMMARY\n';
-   csv += `Total Conversations,${totalConversations}\n`;
-   csv += `Total Messages,${totalMessages}\n`;
-   csv += `Total Cost,${totalCost.toFixed(4)}\n`;
-   csv += `Total Input Tokens,${totalInputTokens}\n`;
-   csv += `Total Output Tokens,${totalOutputTokens}\n`;
-   csv += `Total Tokens,${totalInputTokens + totalOutputTokens}\n`;
-   csv += `Report Generated,${new Date().toLocaleString()}\n`;
-   
-   const filename = `claude_max_usage_report_${new Date().toISOString().split('T')[0]}.csv`;
-   
-   res.setHeader('Content-Type', 'text/csv');
-   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-   res.send(csv);
+    // Generate Markdown report
+    let markdown = '';
+    
+    markdown += `# Claude Max - Usage Report\n\n`;
+    markdown += `**Generated:** ${new Date().toLocaleString()}\n\n`;
+    markdown += `---\n\n`;
+    
+    // Overview
+    markdown += `## Overview\n\n`;
+    markdown += `- **Total Conversations:** ${totalConversations.toLocaleString()}\n`;
+    markdown += `- **Total Messages:** ${totalMessages.toLocaleString()}\n`;
+    markdown += `- **Total Cost:** $${totalCost.toFixed(4)}\n`;
+    markdown += `- **Total Tokens:** ${(totalInputTokens + totalOutputTokens).toLocaleString()} (${totalInputTokens.toLocaleString()} in / ${totalOutputTokens.toLocaleString()} out)\n\n`;
+    markdown += `---\n\n`;
+    
+    // By Model
+    markdown += `## Usage by Model\n\n`;
+    const modelNames = {
+      'claude-3-5-haiku-20241022': 'Haiku 3.5',
+      'claude-sonnet-4-20250514': 'Sonnet 4',
+      'claude-opus-4-20250514': 'Opus 4'
+    };
+    
+    Object.entries(byModel).sort((a, b) => b[1].cost - a[1].cost).forEach(([model, stats]) => {
+      const displayName = modelNames[model] || model;
+      markdown += `### ${displayName}\n`;
+      markdown += `- **Conversations:** ${stats.conversations.toLocaleString()}\n`;
+      markdown += `- **Cost:** $${stats.cost.toFixed(4)}\n`;
+      markdown += `- **Tokens:** ${(stats.inputTokens + stats.outputTokens).toLocaleString()} (${stats.inputTokens.toLocaleString()} in / ${stats.outputTokens.toLocaleString()} out)\n\n`;
+    });
+    
+    markdown += `---\n\n`;
+    
+    // By Project
+    markdown += `## Usage by Project\n\n`;
+    Object.entries(byProject).sort((a, b) => b[1].cost - a[1].cost).forEach(([key, stats]) => {
+      markdown += `### ${stats.icon} ${stats.name}\n`;
+      markdown += `- **Conversations:** ${stats.conversations.toLocaleString()}\n`;
+      markdown += `- **Cost:** $${stats.cost.toFixed(4)}\n`;
+      markdown += `- **Tokens:** ${stats.tokens.toLocaleString()}\n\n`;
+    });
+    
+    markdown += `---\n\n`;
+    
+    // Top 10 Most Expensive Conversations
+    markdown += `## Top 10 Most Expensive Conversations\n\n`;
+    conversations.slice(0, 10).forEach((conv, idx) => {
+      const modelName = modelNames[conv.model] || conv.model || 'Unknown';
+      markdown += `${idx + 1}. **${conv.title}** - $${Number(conv.total_cost).toFixed(4)} - ${modelName} - ${(conv.total_input_tokens + conv.total_output_tokens).toLocaleString()} tokens\n`;
+    });
+    
+    markdown += `\n---\n\n`;
+    markdown += `*Report generated by Claude Max*\n`;
+    
+    const filename = `claude_max_usage_report_${new Date().toISOString().split('T')[0]}.md`;
+    
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(markdown);
     
   } catch (error) {
     console.error('Usage report error:', error);

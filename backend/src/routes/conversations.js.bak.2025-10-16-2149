@@ -346,12 +346,6 @@ router.get('/:id/export', async (req, res) => {
 // Generate global usage report
 router.get('/report/usage', async (req, res) => {
   try {
-    // Helper function to strip emojis from text - CLEAN DATA FOR CSV
-    const stripEmojis = (str) => {
-      if (!str) return str;
-      return str.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F300}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2700}-\u{27BF}]/gu, '').trim();
-    };
-    
     // Get all conversations with stats
     const convsResult = await pool.query(`
       SELECT 
@@ -426,12 +420,11 @@ router.get('/report/usage', async (req, res) => {
    // Header
    csv += 'Title,Model,Project,Created,Updated,Cost,Input Tokens,Output Tokens,Total Tokens\n';
    
-   // Data rows - STRIP EMOJIS FROM PROJECT NAMES
+   // Data rows
    conversations.forEach(conv => {
      const title = `"${(conv.title || 'Untitled').replace(/"/g, '""')}"`;
      const model = modelNames[conv.model] || conv.model || 'Unknown';
-     // STRIP EMOJIS HERE - CLEAN DATA!
-     const project = conv.project_name ? `"${stripEmojis(conv.project_name)}"` : 'Uncategorized';
+     const project = conv.project_name ? `"${conv.project_icon} ${conv.project_name}"` : 'Uncategorized';
      const created = new Date(conv.created_at).toLocaleDateString();
      const updated = new Date(conv.updated_at).toLocaleDateString();
      const cost = Number(conv.total_cost).toFixed(4);
