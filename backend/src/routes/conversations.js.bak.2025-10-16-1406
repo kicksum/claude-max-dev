@@ -1,0 +1,178 @@
+const express = require('express');
+const router = express.Router();
+const conversationService = require('../services/conversation.service');
+const claudeService = require('../services/claude.service');
+const pool = require('../config/database');
+
+// Get all conversations
+router.get('/', async (req, res) => {
+  try {
+    const conversations = await conversationService.getAllConversations();
+    res.json(conversations);
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create new conversation
+router.post('/', async (req, res) => {
+  try {
+    const { title, model } = req.body;
+    const conversation = await conversationService.createConversation(title || 'New Chat', model);
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error creating conversation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update conversation title
+router.put('/:id/title', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title } = req.body;
+    
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+    
+    const conversation = await conversationService.updateConversation(id, { title: title.trim() });
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error updating conversation title:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update conversation (including project assignment)
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const conversation = await conversationService.updateConversation(id, updates);
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error updating conversation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PATCH route for compatibility (same as PUT)
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const conversation = await conversationService.updateConversation(id, updates);
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error updating conversation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete conversation
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await conversationService.deleteConversation(id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate title from message content
+router.post('/:id/generate-title', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+    
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+    
+    // Use Claude to generate a short, descriptive title
+    const titlePrompt = `Generate a very short, concise title (3-6 words max) for a conversation that starts with: "${content.substring(0, 200)}..."
+
+Reply with ONLY the title, no quotes, no explanation.`;
+    
+    const title = await claudeService.generateTitle(titlePrompt);
+    
+    // Update the conversation with the new title
+    const conversation = await conversationService.updateConversation(id, { title });
+    
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error generating title:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Export conversation as Markdown
+router.get('/:id/export', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const format = req.query.format || 'markdown';
+
+    // Get conversation with metadata
+    const convResult = await pool.query(
+      'SELECT * FROM conversations WHERE id = $1',
+      [id]
+    );
+
+    if (convResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const conversation = convResult.rows[0];
+
+    // Get all messages
+    const messagesResult = await pool.query(
+      'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+      [id]
+    );
+
+    const messages = messagesResult.rows;
+
+    // Generate Markdown
+    let markdown = '';
+    
+    // Title and metadata
+    markdown += `# ${conversation.title}\n\n`;
+    markdown += `**Model:** ${conversation.model || 'N/A'}\n`;
+    markdown += `**Created:** ${new Date(conversation.created_at).toLocaleString()}\n`;
+    markdown += `**Updated:** ${new Date(conversation.updated_at).toLocaleString()}\n`;
+    markdown += `**Total Cost:** $${Number(conversation.total_cost).toFixed(4)}\n`;
+    markdown += `**Total Tokens:** ${(conversation.total_input_tokens + conversation.total_output_tokens).toLocaleString()} (${conversation.total_input_tokens.toLocaleString()} in, ${conversation.total_output_tokens.toLocaleString()} out)\n\n`;
+    markdown += '---\n\n';
+
+    // Messages
+    messages.forEach((msg, index) => {
+      const role = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
+      const timestamp = new Date(msg.created_at).toLocaleString();
+      
+      markdown += `## ${role} - ${timestamp}\n\n`;
+      markdown += `${msg.content}\n\n`;
+      
+      if (msg.cost > 0) {
+        markdown += `*Cost: $${Number(msg.cost).toFixed(4)} | Tokens: ${msg.input_tokens + msg.output_tokens} (${msg.input_tokens} in, ${msg.output_tokens} out)*\n\n`;
+      }
+      
+      markdown += '---\n\n';
+    });
+
+    // Set headers for download
+    const filename = `${conversation.title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.md`;
+    
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(markdown);
+
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Failed to export conversation' });
+  }
+});
+module.exports = router;

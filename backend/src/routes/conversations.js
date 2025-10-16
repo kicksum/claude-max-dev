@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const conversationService = require('../services/conversation.service');
 const claudeService = require('../services/claude.service');
+const pool = require('../config/database');
 
 // Get all conversations
 router.get('/', async (req, res) => {
@@ -109,4 +110,237 @@ Reply with ONLY the title, no quotes, no explanation.`;
   }
 });
 
+// Export conversation as Markdown or JSON
+router.get('/:id/export', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const format = req.query.format || 'markdown';
+
+    // Get conversation with metadata
+    const convResult = await pool.query(
+      'SELECT * FROM conversations WHERE id = $1',
+      [id]
+    );
+
+    if (convResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const conversation = convResult.rows[0];
+
+    // Get all messages
+    const messagesResult = await pool.query(
+      'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+      [id]
+    );
+
+    const messages = messagesResult.rows;
+
+    if (format === 'json') {
+      // JSON Export
+      const jsonData = {
+        conversation: {
+          id: conversation.id,
+          title: conversation.title,
+          model: conversation.model,
+          created_at: conversation.created_at,
+          updated_at: conversation.updated_at,
+          total_cost: Number(conversation.total_cost),
+          total_input_tokens: conversation.total_input_tokens,
+          total_output_tokens: conversation.total_output_tokens,
+          project_id: conversation.project_id
+        },
+        messages: messages.map(msg => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          created_at: msg.created_at,
+          cost: Number(msg.cost),
+          input_tokens: msg.input_tokens,
+          output_tokens: msg.output_tokens
+        })),
+        exported_at: new Date().toISOString(),
+        export_version: '1.0'
+      };
+
+      const filename = `${conversation.title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.json(jsonData);
+
+    } else {
+      // Markdown Export
+      let markdown = '';
+      
+      // Title and metadata
+      markdown += `# ${conversation.title}\n\n`;
+      markdown += `**Model:** ${conversation.model || 'N/A'}\n`;
+      markdown += `**Created:** ${new Date(conversation.created_at).toLocaleString()}\n`;
+      markdown += `**Updated:** ${new Date(conversation.updated_at).toLocaleString()}\n`;
+      markdown += `**Total Cost:** $${Number(conversation.total_cost).toFixed(4)}\n`;
+      markdown += `**Total Tokens:** ${(conversation.total_input_tokens + conversation.total_output_tokens).toLocaleString()} (${conversation.total_input_tokens.toLocaleString()} in, ${conversation.total_output_tokens.toLocaleString()} out)\n\n`;
+      markdown += '---\n\n';
+
+      // Messages
+      messages.forEach((msg, index) => {
+        const role = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
+        const timestamp = new Date(msg.created_at).toLocaleString();
+        
+        markdown += `## ${role} - ${timestamp}\n\n`;
+        markdown += `${msg.content}\n\n`;
+        
+        if (msg.cost > 0) {
+          markdown += `*Cost: $${Number(msg.cost).toFixed(4)} | Tokens: ${msg.input_tokens + msg.output_tokens} (${msg.input_tokens} in, ${msg.output_tokens} out)*\n\n`;
+        }
+        
+        markdown += '---\n\n';
+      });
+
+      const filename = `${conversation.title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.md`;
+      
+      res.setHeader('Content-Type', 'text/markdown');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(markdown);
+    }
+
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Failed to export conversation' });
+  }
+ });
+ // Bulk export all conversations in a project as ZIP
+ router.get('/project/:projectId/export', async (req, res) => {
+   try {
+     const { projectId } = req.params;
+     const format = req.query.format || 'markdown';
+     
+     const archiver = require('archiver');
+     
+     // Get project info
+     const projectResult = await pool.query(
+       'SELECT * FROM projects WHERE id = $1',
+       [projectId]
+     );
+     
+     if (projectResult.rows.length === 0) {
+       return res.status(404).json({ error: 'Project not found' });
+     }
+     
+     const project = projectResult.rows[0];
+     
+     // Get all conversations in this project
+     const convsResult = await pool.query(
+       'SELECT * FROM conversations WHERE project_id = $1 ORDER BY created_at DESC',
+       [projectId]
+     );
+     
+     if (convsResult.rows.length === 0) {
+       return res.status(404).json({ error: 'No conversations in this project' });
+     }
+     
+     const conversations = convsResult.rows;
+     
+     // Create ZIP archive
+     const archive = archiver('zip', {
+       zlib: { level: 9 }
+     });
+     
+     const projectName = project.name.replace(/[^a-z0-9]/gi, '_');
+     const timestamp = new Date().toISOString().split('T')[0];
+     const zipFilename = `${projectName}_export_${timestamp}.zip`;
+     
+     res.setHeader('Content-Type', 'application/zip');
+     res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+     
+     archive.pipe(res);
+     
+     // Add each conversation to the ZIP
+     for (const conv of conversations) {
+       // Get messages for this conversation
+       const messagesResult = await pool.query(
+         'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+         [conv.id]
+       );
+       
+       const messages = messagesResult.rows;
+       
+       if (format === 'json') {
+         // JSON format
+         const jsonData = {
+           conversation: {
+             id: conv.id,
+             title: conv.title,
+             model: conv.model,
+             created_at: conv.created_at,
+             updated_at: conv.updated_at,
+             total_cost: Number(conv.total_cost),
+             total_input_tokens: conv.total_input_tokens,
+             total_output_tokens: conv.total_output_tokens,
+             project_id: conv.project_id
+           },
+           messages: messages.map(msg => ({
+             id: msg.id,
+             role: msg.role,
+             content: msg.content,
+             created_at: msg.created_at,
+             cost: Number(msg.cost),
+             input_tokens: msg.input_tokens,
+             output_tokens: msg.output_tokens
+           })),
+           exported_at: new Date().toISOString(),
+           export_version: '1.0'
+         };
+         
+         const filename = `${conv.title.replace(/[^a-z0-9]/gi, '_')}.json`;
+         archive.append(JSON.stringify(jsonData, null, 2), { name: filename });
+         
+       } else {
+         // Markdown format
+         let markdown = '';
+         
+         markdown += `# ${conv.title}\n\n`;
+         markdown += `**Model:** ${conv.model || 'N/A'}\n`;
+         markdown += `**Created:** ${new Date(conv.created_at).toLocaleString()}\n`;
+         markdown += `**Updated:** ${new Date(conv.updated_at).toLocaleString()}\n`;
+         markdown += `**Total Cost:** $${Number(conv.total_cost).toFixed(4)}\n`;
+         markdown += `**Total Tokens:** ${(conv.total_input_tokens + conv.total_output_tokens).toLocaleString()} (${conv.total_input_tokens.toLocaleString()} in, ${conv.total_output_tokens.toLocaleString()} out)\n\n`;
+         markdown += '---\n\n';
+         
+         messages.forEach((msg) => {
+           const role = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
+           const timestamp = new Date(msg.created_at).toLocaleString();
+           
+           markdown += `## ${role} - ${timestamp}\n\n`;
+           markdown += `${msg.content}\n\n`;
+           
+           if (msg.cost > 0) {
+             markdown += `*Cost: $${Number(msg.cost).toFixed(4)} | Tokens: ${msg.input_tokens + msg.output_tokens} (${msg.input_tokens} in, ${msg.output_tokens} out)*\n\n`;
+           }
+           
+           markdown += '---\n\n';
+         });
+         
+         const filename = `${conv.title.replace(/[^a-z0-9]/gi, '_')}.md`;
+         archive.append(markdown, { name: filename });
+       }
+     }
+     
+     // Add a README
+     const readme = `# ${project.name} - Export\n\n` +
+       `Exported: ${new Date().toLocaleString()}\n` +
+       `Total Conversations: ${conversations.length}\n` +
+       `Format: ${format}\n\n` +
+       `## Conversations\n\n` +
+       conversations.map((c, i) => `${i + 1}. ${c.title}`).join('\n');
+     
+     archive.append(readme, { name: 'README.md' });
+     
+     await archive.finalize();
+     
+   } catch (error) {
+     console.error('Bulk export error:', error);
+     res.status(500).json({ error: 'Failed to export project' });
+   }
+ });
 module.exports = router;
