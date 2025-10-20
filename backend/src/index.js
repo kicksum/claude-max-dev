@@ -3,7 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const conversationRoutes = require('./routes/conversations');
 const messageRoutes = require('./routes/messages');
-const projectRoutes = require('./routes/projects');  // ← ADD THIS LINE
+const projectRoutes = require('./routes/projects');
+const ragRoutes = require('./routes/rag');  // ← RAG routes
 const { initDatabase } = require('./config/database');
 console.log('🔍 Loading upload routes...');
 const uploadRoutes = require('./routes/upload');
@@ -23,7 +24,8 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
-app.use('/api/projects', projectRoutes);  // ← ADD THIS LINE
+app.use('/api/projects', projectRoutes);
+app.use('/api/rag', ragRoutes);  // ← RAG routes
 console.log('🔍 Registering /api/upload route...');
 app.use('/api/upload', uploadRoutes);
 console.log('✅ /api/upload route registered!');
@@ -61,7 +63,3 @@ async function start() {
 }
 
 start();
-// Test comment for promotion workflow
-
-// Promotion test 19:34:21
-// Promotion test #2 20:01:28

@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const ollamaService = require('./ollama.service');
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -20,7 +21,16 @@ function calculateCost(model, inputTokens, outputTokens) {
 }
 
 async function sendMessage(messages, model = 'claude-sonnet-4-20250514', maxTokens = 4096) {
+  // Check if this is a local model request
+  if (ollamaService.isLocalModel(model)) {
+    console.log('🏠 Routing to local Ollama service...');
+    return await ollamaService.sendMessage(messages, model, maxTokens);
+  }
+
+  // Otherwise, use Anthropic's Claude API
   try {
+    console.log(`☁️  Routing to Claude API (${model})...`);
+    
     const response = await client.messages.create({
       model: model,
       max_tokens: maxTokens,
@@ -31,15 +41,20 @@ async function sendMessage(messages, model = 'claude-sonnet-4-20250514', maxToke
     const outputTokens = response.usage.output_tokens;
     const cost = calculateCost(model, inputTokens, outputTokens);
 
+    console.log(`✅ Claude API response received`);
+    console.log(`   Tokens: ${inputTokens} in / ${outputTokens} out`);
+    console.log(`   Cost: $${cost.toFixed(6)}`);
+
     return {
       content: response.content[0].text,
       inputTokens,
       outputTokens,
       cost,
       model: response.model,
+      source: 'anthropic-api'
     };
   } catch (error) {
-    console.error('Claude API error:', error);
+    console.error('❌ Claude API error:', error);
     throw new Error(`Claude API error: ${error.message}`);
   }
 }

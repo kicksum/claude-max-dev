@@ -38,10 +38,13 @@ export default function Home() {
   const titleInputRef = useRef(null);
   const sidebarInputRef = useRef(null);
 
+  // 🆕 UPDATED: Added local models to the dropdown
   const models = [
-    { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5', cost: '$1/$5' },
-    { id: 'claude-sonnet-4-20250514', name: 'Sonnet 4', cost: '$3/$15' },
-    { id: 'claude-opus-4-20250514', name: 'Opus 4', cost: '$15/$75' },
+    { id: 'claude-3-5-haiku-20241022', name: 'Haiku 3.5', cost: '$1/$5', type: 'cloud' },
+    { id: 'claude-sonnet-4-20250514', name: 'Sonnet 4', cost: '$3/$15', type: 'cloud' },
+    { id: 'claude-opus-4-20250514', name: 'Opus 4', cost: '$15/$75', type: 'cloud' },
+    { id: 'local-deepseek-r1-8b', name: 'DeepSeek R1 8B (Local)', cost: 'FREE 🏠', type: 'local' },
+    { id: 'local-deepseek-r1-8b-rag', name: 'DeepSeek R1 8B + RAG', cost: 'FREE 🧠', type: 'local' },
   ];
 
   useEffect(() => {
@@ -219,17 +222,17 @@ export default function Home() {
       setConversations(prev =>
         prev.map(c => c.id === updated.id ? updated : c)
       );
-      if (activeConversation?.id === convId) {
+      if (activeConversation && activeConversation.id === convId) {
         setActiveConversation(updated);
       }
-      setEditingSidebarId(null);
+      cancelEditingSidebarTitle();
     } catch (error) {
       console.error('Failed to update title:', error);
       alert('Failed to update title');
     }
   };
 
-  const handleSidebarTitleKeyDown = (convId, e) => {
+  const handleSidebarTitleKeyDown = (e, convId) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       saveSidebarTitle(convId);
@@ -238,9 +241,60 @@ export default function Home() {
     }
   };
 
-  // File handling functions
+  const deleteConversation = async (id) => {
+    if (!confirm('Delete this conversation? This cannot be undone.')) return;
+    
+    try {
+      await api.deleteConversation(id);
+      setConversations(prev => prev.filter(c => c.id !== id));
+      if (activeConversation?.id === id) {
+        const remaining = conversations.filter(c => c.id !== id);
+        setActiveConversation(remaining.length > 0 ? remaining[0] : null);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      alert('Failed to delete conversation');
+    }
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || loading || !activeConversation) return;
+
+    const messageText = input;
+    setInput('');
+    setLoading(true);
+
+    try {
+      await api.sendMessage(activeConversation.id, messageText, model, uploadedFileIds);
+      setUploadedFileIds([]);
+      setSelectedFiles([]);
+      await loadMessages(activeConversation.id);
+      await loadConversations();
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      alert('Failed to send message: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFilesSelected = async (files) => {
-    setSelectedFiles(prev => [...prev, ...files]);
+    setSelectedFiles(Array.from(files));
+    
+    try {
+      const uploadedIds = [];
+      for (const file of files) {
+        const response = await api.uploadFile(file);
+        uploadedIds.push(response.id);
+      }
+      setUploadedFileIds(uploadedIds);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert('Failed to upload files: ' + error.message);
+      setSelectedFiles([]);
+      setUploadedFileIds([]);
+    }
   };
 
   const handleRemoveFile = (index) => {
@@ -248,313 +302,30 @@ export default function Home() {
     setUploadedFileIds(prev => prev.filter((_, i) => i !== index));
   };
 
-  const uploadFiles = async () => {
-    if (selectedFiles.length === 0) return [];
-
-    const formData = new FormData();
-    selectedFiles.forEach(file => {
-      formData.append('files', file);
-    });
-
+  const handleExportConversation = async (conversationId, format) => {
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-      const response = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('File upload failed');
-      }
-
-      const data = await response.json();
-      return data.files.map(f => f.id);
+      await api.exportConversation(conversationId, format);
     } catch (error) {
-      console.error('Upload error:', error);
-      throw error;
+      console.error('Export failed:', error);
+      alert('Failed to export conversation: ' + error.message);
     }
   };
 
-  // Export conversation function
-  const handleExportConversation = async (conversationId, format = 'markdown') => {
-    try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-      const response = await fetch(`${API_URL}/api/conversations/${conversationId}/export?format=${format}`);
-      
-      if (!response.ok) {
-        throw new Error('Export failed');
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      
-      const extension = format === 'json' ? 'json' : 'md';
-      a.download = `conversation_${new Date().toISOString().split('T')[0]}.${extension}`;
-      
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Export error:', error);
-      alert('Failed to export conversation');
-    }
-  };
-
-  // Bulk export project conversations
-  const handleBulkExport = async (projectId, projectName) => {
-    try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-      const response = await fetch(`${API_URL}/api/conversations/project/${projectId}/export?format=markdown`);
-      
-      if (!response.ok) {
-        throw new Error('Bulk export failed');
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${projectName.replace(/[^a-z0-9]/gi, '_')}_export_${new Date().toISOString().split('T')[0]}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Bulk export error:', error);
-      alert('Failed to export project');
-    }
-  };
-
-  // Generate global usage report
   const handleGenerateReport = async () => {
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-      const response = await fetch(`${API_URL}/api/conversations/report/usage`);
-      
-      if (!response.ok) {
-        throw new Error('Report generation failed');
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `claude_max_usage_report_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await api.generateGlobalReport();
     } catch (error) {
-      console.error('Report generation error:', error);
-      alert('Failed to generate usage report');
-    }
-  };
-
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || !activeConversation || loading) return;
-
-    const userMessage = input.trim();
-    const isFirstMessage = messages.length === 0;
-    setLoading(true);
-
-    try {
-      // Upload files first if any
-      let fileIds = [];
-      if (selectedFiles.length > 0) {
-        fileIds = await uploadFiles();
-        setUploadedFileIds(fileIds);
-      }
-
-      const tempUserMsg = {
-        role: 'user',
-        content: userMessage,
-        created_at: new Date().toISOString(),
-        files: selectedFiles.map(f => ({ original_filename: f.name, mime_type: f.type }))
-      };
-      
-      setMessages(prev => [...prev, tempUserMsg]);
-      setInput('');
-      setSelectedFiles([]);
-
-      const response = await api.sendMessage(activeConversation.id, userMessage, model, fileIds);
-
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.id);
-        return [...filtered,
-          { ...tempUserMsg, id: 'user-' + Date.now() },
-          response.message
-        ];
-      });
-
-      setActiveConversation(response.conversation);
-      setConversations(prev =>
-        prev.map(c => c.id === response.conversation.id ? response.conversation : c)
-      );
-
-      // Auto-generate title if this was the first message
-      if (isFirstMessage && activeConversation.title === 'New Chat') {
-        try {
-          const updated = await api.generateConversationTitle(activeConversation.id, userMessage);
-          setActiveConversation(updated);
-          setConversations(prev =>
-            prev.map(c => c.id === updated.id ? updated : c)
-          );
-        } catch (titleError) {
-          console.error('Failed to generate title:', titleError);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      alert('Failed to send message: ' + error.message);
-      setMessages(prev => prev.filter(m => !m.files || m.id));
-    } finally {
-      setLoading(false);
-      setUploadedFileIds([]);
-    }
-  };
-
-  const handleDeleteConversation = async (id) => {
-    if (!confirm('Delete this conversation?')) return;
-    try {
-      await api.deleteConversation(id);
-      const filtered = conversations.filter(c => c.id !== id);
-      setConversations(filtered);
-      if (activeConversation?.id === id) {
-        setActiveConversation(filtered[0] || null);
-        setMessages([]);
-      }
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
+      console.error('Report generation failed:', error);
+      alert('Failed to generate report: ' + error.message);
     }
   };
 
   // Search functions
-  const highlightMatches = () => {
-    const query = searchQuery.toLowerCase().trim();
-    if (!query) return;
-
-    let matchCount = 0;
-    const messagesContainer = document.getElementById('messages-container');
-    if (!messagesContainer) return;
-
-    clearHighlights();
-
-    const walker = document.createTreeWalker(
-      messagesContainer,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          const parent = node.parentElement;
-          if (!parent || parent.tagName === 'MARK' || parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
-
-    const nodesToReplace = [];
-    let node;
-    while (node = walker.nextNode()) {
-      const text = node.textContent || '';
-      const lowerText = text.toLowerCase();
-      if (lowerText.includes(query)) {
-        nodesToReplace.push(node);
-      }
-    }
-
-    nodesToReplace.forEach(node => {
-      const text = node.textContent || '';
-      const lowerText = text.toLowerCase();
-      const parts = [];
-      let lastIndex = 0;
-      let index = lowerText.indexOf(query);
-
-      while (index !== -1) {
-        if (index > lastIndex) {
-          parts.push(document.createTextNode(text.substring(lastIndex, index)));
-        }
-
-        const mark = document.createElement('mark');
-        mark.className = matchCount === currentMatchIndex
-          ? 'search-highlight-current bg-yellow-400 text-black px-0.5 rounded font-semibold'
-          : 'search-highlight bg-yellow-200 text-black px-0.5 rounded';
-        mark.textContent = text.substring(index, index + query.length);
-        mark.dataset.matchIndex = matchCount;
-        parts.push(mark);
-
-        matchCount++;
-        lastIndex = index + query.length;
-        index = lowerText.indexOf(query, lastIndex);
-      }
-
-      if (lastIndex < text.length) {
-        parts.push(document.createTextNode(text.substring(lastIndex)));
-      }
-
-      const parent = node.parentElement;
-      if (parent) {
-        const fragment = document.createDocumentFragment();
-        parts.forEach(part => fragment.appendChild(part));
-        parent.replaceChild(fragment, node);
-      }
-    });
-
-    setTotalMatches(matchCount);
-
-    if (matchCount > 0) {
-      scrollToMatch(currentMatchIndex);
-    }
-  };
-
-  const clearHighlights = () => {
-    const highlights = document.querySelectorAll('.search-highlight, .search-highlight-current');
-    highlights.forEach(mark => {
-      const parent = mark.parentElement;
-      if (parent) {
-        parent.replaceChild(document.createTextNode(mark.textContent || ''), mark);
-        parent.normalize();
-      }
-    });
-    setTotalMatches(0);
-  };
-
-  const scrollToMatch = (index) => {
-    const highlights = document.querySelectorAll('.search-highlight, .search-highlight-current');
-    if (highlights[index]) {
-      highlights[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  };
-
   const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearchQuery(value);
+    const query = e.target.value;
+    setSearchQuery(query);
+    setSearchActive(query.trim().length > 0);
     setCurrentMatchIndex(0);
-    if (value.trim()) {
-      setSearchActive(true);
-    } else {
-      setSearchActive(false);
-    }
-  };
-
-  const navigateToNextMatch = () => {
-    if (totalMatches > 0) {
-      const nextIndex = (currentMatchIndex + 1) % totalMatches;
-      setCurrentMatchIndex(nextIndex);
-      scrollToMatch(nextIndex);
-    }
-  };
-
-  const navigateToPrevMatch = () => {
-    if (totalMatches > 0) {
-      const prevIndex = currentMatchIndex === 0 ? totalMatches - 1 : currentMatchIndex - 1;
-      setCurrentMatchIndex(prevIndex);
-      scrollToMatch(prevIndex);
-    }
   };
 
   const handleSearchKeyDown = (e) => {
@@ -571,322 +342,299 @@ export default function Home() {
     }
   };
 
+  const highlightMatches = () => {
+    clearHighlights();
+    
+    if (!searchQuery.trim()) return;
+
+    const container = document.getElementById('messages-container');
+    if (!container) return;
+
+    const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    let matchCount = 0;
+
+    Object.values(messageRefs.current).forEach((element) => {
+      if (!element) return;
+
+      const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      const textNodes = [];
+      while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+      }
+
+      textNodes.forEach((node) => {
+        const text = node.textContent;
+        if (!regex.test(text)) return;
+
+        const span = document.createElement('span');
+        span.innerHTML = text.replace(regex, (match) => {
+          matchCount++;
+          return `<mark class="search-highlight" data-match-index="${matchCount - 1}">${match}</mark>`;
+        });
+
+        node.parentNode.replaceChild(span, node);
+      });
+    });
+
+    setTotalMatches(matchCount);
+
+    if (matchCount > 0) {
+      scrollToMatch(0);
+    }
+  };
+
+  const clearHighlights = () => {
+    const highlights = document.querySelectorAll('.search-highlight');
+    highlights.forEach((mark) => {
+      const parent = mark.parentNode;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize();
+    });
+
+    const activeHighlights = document.querySelectorAll('.search-highlight-active');
+    activeHighlights.forEach((mark) => {
+      mark.classList.remove('search-highlight-active');
+    });
+
+    setTotalMatches(0);
+    setCurrentMatchIndex(0);
+  };
+
+  const scrollToMatch = (index) => {
+    const marks = document.querySelectorAll('.search-highlight');
+    if (marks.length === 0) return;
+
+    marks.forEach(m => m.classList.remove('search-highlight-active'));
+
+    const targetMark = marks[index];
+    if (targetMark) {
+      targetMark.classList.add('search-highlight-active');
+      targetMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const navigateToNextMatch = () => {
+    if (totalMatches === 0) return;
+    const nextIndex = (currentMatchIndex + 1) % totalMatches;
+    setCurrentMatchIndex(nextIndex);
+    scrollToMatch(nextIndex);
+  };
+
+  const navigateToPrevMatch = () => {
+    if (totalMatches === 0) return;
+    const prevIndex = currentMatchIndex === 0 ? totalMatches - 1 : currentMatchIndex - 1;
+    setCurrentMatchIndex(prevIndex);
+    scrollToMatch(prevIndex);
+  };
+
   const formatCost = (cost) => {
-    return `$${Number(cost).toFixed(4)}`;
+    if (cost === null || cost === undefined || isNaN(cost)) return 'N/A';
+    if (cost === 0) return 'FREE 🎉';
+    return `$${Number(cost).toFixed(6)}`;
   };
 
   const formatTokens = (tokens) => {
-    return tokens?.toLocaleString() || '0';
+    if (tokens === null || tokens === undefined || isNaN(tokens)) return '0';
+    const numTokens = Number(tokens);
+    if (numTokens >= 1000) {
+      return `${(numTokens / 1000).toFixed(1)}k`;
+    }
+    return Math.round(numTokens).toString();
   };
 
-  // Group conversations by project
-  const conversationsByProject = {};
-  const uncategorized = [];
-
-  conversations.forEach(conv => {
-    if (conv.project_id) {
-      if (!conversationsByProject[conv.project_id]) {
-        conversationsByProject[conv.project_id] = [];
-      }
-      conversationsByProject[conv.project_id].push(conv);
-    } else {
-      uncategorized.push(conv);
-    }
-  });
-
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100">
+    <div className="flex h-screen bg-gray-900 text-white">
+      <style jsx global>{`
+        .search-highlight {
+          background-color: #fbbf24;
+          color: #000;
+          padding: 0 2px;
+          border-radius: 2px;
+        }
+        .search-highlight-active {
+          background-color: #f97316;
+          color: #fff;
+        }
+      `}</style>
+
       {/* Sidebar */}
       <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+        {/* Sidebar Header */}
         <div className="p-4 border-b border-gray-700">
-          <h1 className="text-xl font-bold text-blue-400">Claude Max</h1>
-          <p className="text-xs text-gray-400 mt-1">Unlimited AI Power</p>
-        </div>
-
-        <div className="p-4 space-y-2">
           <button
             onClick={createNewConversation}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition"
           >
-            + New Chat
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Chat
           </button>
+        </div>
 
-          <button
-            onClick={() => setShowNewProject(!showNewProject)}
-            className="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition text-sm"
-          >
-            + New Project
-          </button>
+        {/* Projects Section */}
+        <div className="px-4 py-3 border-b border-gray-700">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-400">PROJECTS</h3>
+            <button
+              onClick={() => setShowNewProject(!showNewProject)}
+              className="text-gray-400 hover:text-white transition"
+              title="New project"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
 
           {showNewProject && (
-            <form onSubmit={handleCreateProject} className="mt-2">
+            <form onSubmit={handleCreateProject} className="mb-2">
               <input
                 type="text"
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 placeholder="Project name..."
-                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm mb-2"
+                className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                 autoFocus
               />
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-sm"
-                >
-                  Create
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowNewProject(false);
-                    setNewProjectName('');
-                  }}
-                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1 px-3 rounded text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
             </form>
           )}
+
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {projects.map(project => (
+              <div key={project.id} className="text-sm text-gray-300 px-2 py-1 hover:bg-gray-700 rounded cursor-pointer">
+                📁 {project.name}
+              </div>
+            ))}
+          </div>
         </div>
 
+        {/* Conversations List */}
         <div className="flex-1 overflow-y-auto">
-          {/* Projects with conversations */}
-          {projects.map(project => {
-            const projectConvs = conversationsByProject[project.id] || [];
-            if (projectConvs.length === 0) return null;
-
-            return (
-              <div key={project.id} className="mb-2">
-                <div className="px-3 py-2 text-xs font-semibold text-gray-400 flex items-center justify-between group">
-                  <div className="flex items-center gap-2">
-                    <span>{project.icon}</span>
-                    <span>{project.name}</span>
-                    <span className="text-gray-500">({projectConvs.length})</span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleBulkExport(project.id, project.name);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-green-400 hover:text-green-300"
-                    title="Export all conversations in this project"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </button>
-                </div>
-                {projectConvs.map(conv => (
-                  <div
-                    key={conv.id}
-                    onClick={() => setActiveConversation(conv)}
-                    className={`p-3 mx-2 my-1 rounded cursor-pointer transition ${
-                      activeConversation?.id === conv.id
-                        ? 'bg-gray-700'
-                        : 'hover:bg-gray-700'
-                    }`}
-                  >
-                    {editingSidebarId === conv.id ? (
-                      <input
-                        ref={sidebarInputRef}
-                        type="text"
-                        value={editedSidebarTitle}
-                        onChange={(e) => setEditedSidebarTitle(e.target.value)}
-                        onKeyDown={(e) => handleSidebarTitleKeyDown(conv.id, e)}
-                        onBlur={() => saveSidebarTitle(conv.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
-                      />
-                    ) : (
-                      <div
-                        className="text-sm font-medium truncate flex items-center gap-1 group"
-                        onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
-                      >
-                        <span className="flex-1 truncate">{conv.title}</span>
-                        <button
-                          onClick={(e) => startEditingSidebarTitle(conv, e)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Rename"
-                        >
-                          <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-                    <div className="text-xs text-gray-400 mt-1">
-                      {formatCost(conv.total_cost)} • {formatTokens(conv.total_input_tokens + conv.total_output_tokens)} tokens
-                    </div>
-                    <div className="flex gap-2 mt-2">
-                      <select
-                        value={conv.project_id || ''}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleAssignToProject(conv.id, e.target.value || null);
-                        }}
-                        className="flex-1 bg-gray-600 text-xs rounded px-2 py-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <option value="">No Project</option>
-                        {projects.map(p => (
-                          <option key={p.id} value={p.id}>{p.icon} {p.name}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteConversation(conv.id);
-                        }}
-                        className="text-xs text-red-400 hover:text-red-300"
-                      >
-                        Del
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-
-          {/* Uncategorized conversations */}
-          {uncategorized.length > 0 && (
-            <div className="mb-2">
-              <div className="px-3 py-2 text-xs font-semibold text-gray-400">
-                📂 Uncategorized ({uncategorized.length})
-              </div>
-              {uncategorized.map(conv => (
-                <div
-                  key={conv.id}
-                  onClick={() => setActiveConversation(conv)}
-                  className={`p-3 mx-2 my-1 rounded cursor-pointer transition ${
-                    activeConversation?.id === conv.id
-                      ? 'bg-gray-700'
-                      : 'hover:bg-gray-700'
-                  }`}
-                >
+          {conversations.map(conv => (
+            <div
+              key={conv.id}
+              className={`group px-4 py-3 cursor-pointer transition ${
+                activeConversation?.id === conv.id
+                  ? 'bg-gray-700 border-l-4 border-blue-500'
+                  : 'hover:bg-gray-700/50'
+              }`}
+              onClick={() => setActiveConversation(conv)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
                   {editingSidebarId === conv.id ? (
                     <input
                       ref={sidebarInputRef}
                       type="text"
                       value={editedSidebarTitle}
                       onChange={(e) => setEditedSidebarTitle(e.target.value)}
-                      onKeyDown={(e) => handleSidebarTitleKeyDown(conv.id, e)}
+                      onKeyDown={(e) => handleSidebarTitleKeyDown(e, conv.id)}
                       onBlur={() => saveSidebarTitle(conv.id)}
+                      className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-gray-600 border border-blue-500 rounded px-2 py-1 text-sm font-medium"
                     />
                   ) : (
-                    <div
-                      className="text-sm font-medium truncate flex items-center gap-1 group"
-                      onDoubleClick={(e) => startEditingSidebarTitle(conv, e)}
-                    >
-                      <span className="flex-1 truncate">{conv.title}</span>
-                      <button
-                        onClick={(e) => startEditingSidebarTitle(conv, e)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Rename"
-                      >
-                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
-                      </button>
-                    </div>
+                    <>
+                      <div className="text-sm font-medium truncate">{conv.title}</div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {conv.message_count || 0} messages • {formatCost(conv.total_cost || 0)}
+                      </div>
+                    </>
                   )}
-                  <div className="text-xs text-gray-400 mt-1">
-                    {formatCost(conv.total_cost)} • {formatTokens(conv.total_input_tokens + conv.total_output_tokens)} tokens
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <select
-                      value={conv.project_id || ''}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        handleAssignToProject(conv.id, e.target.value || null);
-                      }}
-                      className="flex-1 bg-gray-600 text-xs rounded px-2 py-1"
-                      onClick={(e) => e.stopPropagation()}
+                </div>
+                {editingSidebarId !== conv.id && (
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => startEditingSidebarTitle(conv, e)}
+                      className="p-1 hover:bg-gray-600 rounded"
+                      title="Rename"
                     >
-                      <option value="">No Project</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.icon} {p.name}</option>
-                      ))}
-                    </select>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteConversation(conv.id);
+                        deleteConversation(conv.id);
                       }}
-                      className="text-xs text-red-400 hover:text-red-300"
+                      className="p-1 hover:bg-red-600 rounded"
+                      title="Delete"
                     >
-                      Del
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
                     </button>
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
-          )}
-        </div>
-
-        <div className="p-4 border-t border-gray-700 text-xs text-gray-400">
-          <div>Model: {models.find(m => m.id === model)?.name}</div>
-          {activeConversation && (
-            <div className="mt-2">
-              <div>Total Cost: {formatCost(activeConversation.total_cost)}</div>
-              <div>Tokens: {formatTokens(activeConversation.total_input_tokens + activeConversation.total_output_tokens)}</div>
-            </div>
-          )}
-          <button
-            onClick={handleGenerateReport}
-            className="w-full mt-3 bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded-lg transition text-sm flex items-center justify-center gap-2"
-            title="Generate global usage report (CSV)"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            📊 Usage Report
-          </button>
+          ))}
         </div>
       </div>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        {/* Header with Search */}
-        <div className="bg-gray-800 border-b border-gray-700 p-4">
-          <div className="flex justify-between items-center mb-3">
-            <div className="flex items-center gap-3 flex-1">
-              {editingTitle ? (
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  onKeyDown={handleTitleKeyDown}
-                  onBlur={saveTitle}
-                  className="flex-1 bg-gray-700 border border-blue-500 rounded px-3 py-1 text-lg font-semibold"
-                />
-              ) : (
+        {/* Header */}
+        <div className="bg-gray-800 border-b border-gray-700 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {activeConversation && (
                 <>
-                  <h2
-                    className="text-xl font-semibold cursor-pointer hover:text-blue-400 transition flex items-center gap-2 group"
-                    onClick={startEditingTitle}
-                    title="Click to rename"
-                  >
-                    {activeConversation?.title || 'Select a conversation'}
-                    {activeConversation && (
-                      <svg className="w-4 h-4 text-gray-500 group-hover:text-blue-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    )}
-                  </h2>
-                  {activeConversation && (
+                  {editingTitle ? (
+                    <input
+                      ref={titleInputRef}
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onKeyDown={handleTitleKeyDown}
+                      onBlur={saveTitle}
+                      className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  ) : (
+                    <>
+                      <h1 className="text-xl font-semibold">{activeConversation.title}</h1>
+                      <button
+                        onClick={startEditingTitle}
+                        className="p-1 hover:bg-gray-700 rounded transition"
+                        title="Edit title"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+
+                  {projects.length > 0 && (
+                    <select
+                      value={activeConversation.project_id || ''}
+                      onChange={(e) => handleAssignToProject(activeConversation.id, e.target.value || null)}
+                      className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm"
+                    >
+                      <option value="">No Project</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>📁 {p.name}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {messages.length > 0 && (
                     <div className="relative">
                       <button
                         onClick={() => setShowExportMenu(!showExportMenu)}
-                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition flex items-center gap-2"
+                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-white text-sm rounded-lg transition flex items-center gap-2"
                         title="Export conversation"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         Export
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1041,7 +789,7 @@ export default function Home() {
                         __html: marked.parse(msg.content || '')
                       }}
                     />
-                    {msg.cost > 0 && (
+                    {(msg.cost !== null && msg.cost !== undefined) && (
                       <div className="flex items-center gap-3 text-xs text-gray-500 pt-2 border-t border-gray-800">
                         <span>{formatCost(msg.cost)}</span>
                         <span>•</span>
