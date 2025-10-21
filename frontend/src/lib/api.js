@@ -129,3 +129,52 @@ export async function generateConversationTitle(conversationId, content) {
 
   return response.json();
 }
+
+// ==================== FILE UPLOAD ====================
+
+export async function uploadFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_URL}/api/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) throw new Error('Failed to upload file');
+  return res.json();
+}
+
+// ==================== EXPORT & REPORTS ====================
+
+export async function exportConversation(conversationId, format = 'markdown') {
+  const res = await fetch(`${API_URL}/api/conversations/${conversationId}/export?format=${format}`);
+
+  if (!res.ok) throw new Error('Failed to export conversation');
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `conversation-${conversationId}.${format === 'json' ? 'json' : 'md'}`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
+export async function generateGlobalReport() {
+  const res = await fetch(`${API_URL}/api/conversations/report/usage`);
+
+  if (!res.ok) throw new Error('Failed to generate report');
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `usage-report-${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
