@@ -109,8 +109,10 @@ export default function Home() {
       if (data.length > 0 && !activeConversation) {
         setActiveConversation(data[0]);
       }
+      return data;
     } catch (error) {
       console.error('Failed to load conversations:', error);
+      return [];
     }
   };
 
@@ -152,7 +154,15 @@ export default function Home() {
   const handleAssignToProject = async (conversationId, projectId) => {
     try {
       await api.assignConversationToProject(conversationId, projectId);
-      await loadConversations();
+      const freshConversations = await loadConversations();
+
+      // Update activeConversation with fresh data
+      if (activeConversation?.id === conversationId) {
+        const updated = freshConversations.find(c => c.id === conversationId);
+        if (updated) {
+          setActiveConversation(updated);
+        }
+      }
     } catch (error) {
       console.error('Failed to assign conversation:', error);
       alert('Failed to assign conversation to project');
