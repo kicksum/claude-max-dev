@@ -20,27 +20,15 @@ function isLocalModel(model) {
  * Extract the actual model name for RAG1
  */
 function getRAGModelName(model) {
-  // Remove 'local-' prefix
-  let modelName = model.replace('local-', '');
+  // Convert 'local-deepseek-r1-8b' to 'deepseek-r1:8b'
+  // Convert 'local-deepseek-r1-8b-rag' to 'deepseek-r1:8b'
   
-  // Remove '-rag' suffix if present
-  modelName = modelName.replace(/-rag$/, '');
-  
-  // Convert last dash to colon for version/tag
-  // Match: model-name-version OR model-name-tag
-  // Examples: mistral-latest, mistral-7b, deepseek-r1-8b
-  
-  const match = modelName.match(/^(.+)-([0-9]+[a-z]*|latest|instruct|chat|code)$/);
-  
-  if (match) {
-    const baseName = match[1];
-    const version = match[2];
-    return `${baseName}:${version}`;
+  if (model === 'local-deepseek-r1-8b' || model === 'local-deepseek-r1-8b-rag') {
+    return 'deepseek-r1:8b';
   }
   
-  // Fallback: already has colon or single-word model
-  console.warn(`[RAG] Model name pattern not matched: ${modelName}, using as-is`);
-  return modelName;
+  // Fallback: strip 'local-' and replace last '-' with ':'
+  return model.replace('local-', '').replace(/-(\d+[a-z]*)$/, ':$1');
 }
 
 /**

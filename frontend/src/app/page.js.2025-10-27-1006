@@ -46,7 +46,8 @@ export default function Home() {
 
 // Fetch models from backend on load
 useEffect(() => {
-   api.fetchModels()
+  fetch('/api/models')
+    .then(res => res.json())
     .then(data => {
       if (data.models && data.models.length > 0) {
         setModels(data.models);

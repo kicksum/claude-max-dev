@@ -5,6 +5,7 @@ const conversationRoutes = require('./routes/conversations');
 const messageRoutes = require('./routes/messages');
 const projectRoutes = require('./routes/projects');
 const ragRoutes = require('./routes/rag');  // ← RAG routes
+const modelsRoutes = require('./routes/models');
 const { initDatabase } = require('./config/database');
 console.log('🔍 Loading upload routes...');
 const uploadRoutes = require('./routes/upload');
@@ -25,6 +26,7 @@ app.get('/health', (req, res) => {
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/models', modelsRoutes);
 app.use('/api/rag', ragRoutes);  // ← RAG routes
 console.log('🔍 Registering /api/upload route...');
 app.use('/api/upload', uploadRoutes);

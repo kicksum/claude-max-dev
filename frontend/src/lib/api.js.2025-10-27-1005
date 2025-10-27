@@ -1,18 +1,6 @@
 // ==================== API CONFIGURATION ====================
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8001';
-
-// ==================== MODELS ====================
-
-/**
- * Fetch all available models (cloud + local)
- * @returns {Promise<Object>} Object containing models array and metadata
- */
-export async function fetchModels() {
-  const res = await fetch(`${API_URL}/api/models`);
-  if (!res.ok) throw new Error('Failed to fetch models');
-  return res.json();
-}
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.1.8:8000';
 
 // ==================== CONVERSATIONS ====================
 
@@ -32,7 +20,7 @@ export async function fetchConversations() {
  * @param {string} model - AI model to use (default: claude-sonnet-4-20250514)
  * @returns {Promise<Object>} The created conversation object
  */
-export async function createConversation(title, model = 'claude-sonnet-4-20514') {
+export async function createConversation(title, model = 'claude-sonnet-4-20250514') {
   const res = await fetch(`${API_URL}/api/conversations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

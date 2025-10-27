@@ -1,0 +1,175 @@
+const express = require('express');
+const router = express.Router();
+const conversationService = require('../services/conversation.service');
+const claudeService = require('../services/claude.service');
+const pool = require('../config/database');
+const fs = require('fs').promises;
+
+// Get messages for a conversation
+router.get('/:conversationId', async (req, res, next) => {
+  try {
+    const messages = await conversationService.getMessages(req.params.conversationId);
+    
+    // For each message, fetch attached files
+    for (let message of messages) {
+      const filesResult = await pool.query(
+        'SELECT * FROM message_files WHERE message_id = $1 ORDER BY created_at ASC',
+        [message.id]
+      );
+      message.files = filesResult.rows;
+    }
+    
+    res.json(messages);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Send a message (and get Claude's response)
+router.post('/', async (req, res, next) => {
+  try {
+    const { conversationId, content, model, fileIds } = req.body;
+    
+    if (!conversationId || !content) {
+      return res.status(400).json({ error: 'conversationId and content are required' });
+    }
+
+    // Get conversation to check model
+    const conversation = await conversationService.getConversation(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const useModel = model || conversation.model;
+
+    // Save user message
+    const userMessage = await conversationService.saveMessage(
+      conversationId,
+      'user',
+      content,
+      0,
+      0,
+      0
+    );
+
+    // Link files to message if any
+    if (fileIds && fileIds.length > 0) {
+      for (const fileId of fileIds) {
+        // Get file info from upload response (files are already uploaded)
+        // We need to insert them into message_files table
+        await pool.query(
+          'UPDATE message_files SET message_id = $1 WHERE id = $2',
+          [userMessage.id, fileId]
+        );
+      }
+    }
+
+    // Get conversation history for context
+    const history = await conversationService.getMessages(conversationId);
+
+    // Format messages for Claude API, including file attachments
+    const claudeMessages = [];
+    
+    for (const msg of history) {
+      // Get files for this message
+      const filesResult = await pool.query(
+        'SELECT * FROM message_files WHERE message_id = $1',
+        [msg.id]
+      );
+      const messageFiles = filesResult.rows;
+      console.log(`📎 Message ${msg.id} has ${messageFiles.length} files`);
+      if (messageFiles.length > 0) {
+          console.log('📎 Files:', messageFiles.map(f => f.original_filename));
+      }
+      if (messageFiles.length > 0) {
+        // Message has attachments - format as multi-part content
+        const contentArray = [];
+
+        // Add files first
+        for (const file of messageFiles) {
+          if (file.mime_type.startsWith('image/')) {
+            // Image attachment
+            const fileData = await fs.readFile(file.file_path);
+            const base64Data = fileData.toString('base64');
+            
+            contentArray.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: file.mime_type,
+                data: base64Data
+              }
+            });
+          } else if (file.mime_type === 'application/pdf') {
+            // PDF attachment
+            const fileData = await fs.readFile(file.file_path);
+            const base64Data = fileData.toString('base64');
+            
+            contentArray.push({
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: base64Data
+              }
+            });
+          } else if (file.mime_type.startsWith('text/') || file.mime_type === 'application/json') {
+            // Text file - read and include content
+            const fileContent = await fs.readFile(file.file_path, 'utf-8');
+            contentArray.push({
+              type: 'text',
+              text: `File: ${file.original_filename}\n\n${fileContent}`
+            });
+          }
+        }
+
+        // Add text content last
+        contentArray.push({
+          type: 'text',
+          text: msg.content
+        });
+
+        claudeMessages.push({
+          role: msg.role,
+          content: contentArray
+        });
+      } else {
+        // No attachments - simple text message
+        claudeMessages.push({
+          role: msg.role,
+          content: msg.content
+        });
+      }
+    }
+
+    // Send to Claude
+    const response = await claudeService.sendMessage(claudeMessages, useModel);
+
+    // Save Claude's response
+    const savedMessage = await conversationService.saveMessage(
+      conversationId,
+      'assistant',
+      response.content,
+      response.cost,
+      response.inputTokens,
+      response.outputTokens
+    );
+
+    // Get updated conversation stats
+    const updatedConversation = await conversationService.getConversation(conversationId);
+
+    res.json({
+      message: savedMessage,
+      conversation: updatedConversation,
+      usage: {
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        cost: response.cost
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
