@@ -1,0 +1,74 @@
+--- a/frontend/src/app/page.js
++++ b/frontend/src/app/page.js
+@@ -66,11 +66,17 @@
+   useEffect(() => {
+     if (activeConversation) {
+       loadMessages(activeConversation.id);
++      // 🆕 Load conversation's saved model
++      if (activeConversation.model) {
++        setModel(activeConversation.model);
++        console.log(`Loaded model from conversation: ${activeConversation.model}`);
++      }
+       setSearchQuery('');
+       setSearchActive(false);
+       setCurrentMatchIndex(0);
+       setTotalMatches(0);
+     }
+   }, [activeConversation]);
+
+@@ -692,13 +698,21 @@
+             </div>
+             <div className="flex gap-2 items-center">
+-              <select
+-                value={model}
+-                onChange={(e) => setModel(e.target.value)}
+-                className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
+-              >
+-                {models.map(m => (
+-                  <option key={m.id} value={m.id}>
+-                    {m.name} ({m.cost})
+-                  </option>
+-                ))}
+-              </select>
++              <div className="flex flex-col gap-1">
++                <select
++                  value={model}
++                  onChange={(e) => setModel(e.target.value)}
++                  className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
++                  title="Model selection persists per conversation"
++                >
++                  {models.map(m => (
++                    <option key={m.id} value={m.id}>
++                      {m.name} ({m.cost})
++                    </option>
++                  ))}
++                </select>
++                <span className="text-[10px] text-gray-500 text-center">
++                  Persists per chat
++                </span>
++              </div>
+               <button
+
+@@ -805,6 +819,23 @@
+                 ) : (
+                   <div className="space-y-4">
++                    {/* 🆕 Model Badge */}
++                    {msg.model_used && (
++                      <div className="flex items-center gap-2 mb-2">
++                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-900/50 text-purple-300 border border-purple-700">
++                          {msg.model_used.startsWith('local-') ? (
++                            <>
++                              <span className="mr-1">🖥️</span>
++                              {msg.model_used.replace('local-', '').replace('-rag', ' + RAG')}
++                            </>
++                          ) : (
++                            <>
++                              <span className="mr-1">☁️</span>
++                              {models.find(m => m.id === msg.model_used)?.name || msg.model_used}
++                            </>
++                          )}
++                        </span>
++                      </div>
++                    )}
+                     <div
+                       className="prose prose-xl prose-invert prose-pre:bg-gray-800 prose-pre:text-gray-100 max-w-none prose-p:leading-relaxed prose-headings:font-semibold"

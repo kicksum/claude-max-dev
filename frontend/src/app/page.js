@@ -66,6 +66,10 @@ useEffect(() => {
   useEffect(() => {
     if (activeConversation) {
       loadMessages(activeConversation.id);
+      if (activeConversation.model) {
+      setModel(activeConversation.model);
+      console.log(`Loaded model from conversation: ${activeConversation.model}`);
+     }
       setSearchQuery('');
       setSearchActive(false);
       setCurrentMatchIndex(0);
@@ -695,6 +699,7 @@ useEffect(() => {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm"
+                title="Model selection persists per conversation"
               >
                 {models.map(m => (
                   <option key={m.id} value={m.id}>
@@ -804,7 +809,26 @@ useEffect(() => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div
+                       {/* 🆕 Model Badge */}
+            {msg.model_used && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-900/50 text-purple-300 border border-purple-700">
+               {msg.model_used.startsWith('local-') ? (
+               <>
+                  <span className="mr-1">🖥️</span>
+                {msg.model_used.replace('local-', '').replace('-rag', ' + RAG')}
+               </>
+               ) :  (
+                <>
+                  <span className="mr-1">☁️</span>
+                      {models.find(m => m.id === msg.model_used)?.name || msg.model_used}
+                   </>
+              )}
+             </span>
+               </div>
+                  )}
+ 
+                     <div
                       className="prose prose-xl prose-invert prose-pre:bg-gray-800 prose-pre:text-gray-100 max-w-none prose-p:leading-relaxed prose-headings:font-semibold"
                       dangerouslySetInnerHTML={{
                         __html: marked.parse(msg.content || '')

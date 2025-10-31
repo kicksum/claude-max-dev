@@ -27,6 +27,9 @@ function getRAGModelName(model) {
   modelName = modelName.replace(/-rag$/, '');
   
   // Convert last dash to colon for version/tag
+  // Match: model-name-version OR model-name-tag
+  // Examples: mistral-latest, mistral-7b, deepseek-r1-8b
+  
   const match = modelName.match(/^(.+)-([0-9]+[a-z]*|latest|instruct|chat|code)$/);
   
   if (match) {
@@ -35,6 +38,7 @@ function getRAGModelName(model) {
     return `${baseName}:${version}`;
   }
   
+  // Fallback: already has colon or single-word model
   console.warn(`[RAG] Model name pattern not matched: ${modelName}, using as-is`);
   return modelName;
 }
@@ -63,7 +67,7 @@ async function queryRAG(message, model, includeContext = false) {
         top_k: 5,
         temperature: 0.7
       },
-      { timeout: 60000 }
+      { timeout: 60000 } // 60 second timeout
     );
 
     console.log(`[RAG] Success! Tokens/sec: ${response.data.tokens_per_second}`);
@@ -124,25 +128,17 @@ router.post('/', async (req, res, next) => {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
-    // Use provided model, fallback to conversation model, then default
-    const useModel = model || conversation.model || 'claude-sonnet-4-20250514';
+    const useModel = model || conversation.model;
     console.log(`[API] Processing message with model: ${useModel}`);
 
-    // 🆕 UPDATE CONVERSATION MODEL - Persist the selected model
-    if (model && model !== conversation.model) {
-      await conversationService.updateConversation(conversationId, { model });
-      console.log(`[API] Updated conversation model to: ${model}`);
-    }
-
-    // Save user message (no model_used for user messages)
+    // Save user message
     const userMessage = await conversationService.saveMessage(
       conversationId,
       'user',
       content,
       0,
       0,
-      0,
-      null // user messages don't have model_used
+      0
     );
 
     // Link files to message if any
@@ -158,10 +154,6 @@ router.post('/', async (req, res, next) => {
     let assistantContent;
     let usage = { inputTokens: 0, outputTokens: 0, cost: 0 };
 
-    // 🆕 GET FULL CONVERSATION HISTORY (excluding the message we just saved)
-    const history = await conversationService.getMessages(conversationId);
-    const historyWithoutCurrent = history.filter(msg => msg.id !== userMessage.id);
-
     // Route to appropriate service based on model type
     if (isLocalModel(useModel)) {
       // LOCAL RAG MODEL
@@ -171,30 +163,20 @@ router.post('/', async (req, res, next) => {
       const includeContext = shouldIncludeRAGContext(useModel);
       
       try {
-        // 🆕 BUILD CONVERSATION HISTORY FOR LOCAL MODELS
-        // Note: Most local models through Ollama don't support full conversation history
-        // but we'll include the last few exchanges for context
-        let contextualPrompt = content;
-        
-        if (historyWithoutCurrent.length > 0) {
-          // Get last 3 exchanges (6 messages max) for context
-          const recentHistory = historyWithoutCurrent.slice(-6);
-          const contextMessages = recentHistory
-            .map(msg => `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`)
-            .join('\n\n');
-          
-          contextualPrompt = `Previous conversation:\n${contextMessages}\n\nHuman: ${content}`;
-          console.log(`[API] Including ${recentHistory.length} previous messages in context`);
-        }
-
-        const ragResult = await queryRAG(contextualPrompt, ragModelName, includeContext);
+        const ragResult = await queryRAG(content, ragModelName, includeContext);
 
         if (!ragResult.success) {
           throw new Error('RAG query failed');
         }
 
         assistantContent = ragResult.content;
-        usage = { inputTokens: 0, outputTokens: 0, cost: 0 };
+        
+        // Local models don't have token usage, but we track 0s for consistency
+        usage = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cost: 0
+        };
 
         console.log(`[API] RAG response received (${ragResult.tokensPerSecond.toFixed(2)} tokens/sec)`);
 
@@ -207,10 +189,13 @@ router.post('/', async (req, res, next) => {
       // CLOUD CLAUDE MODEL
       console.log('[API] Routing to Claude API');
 
-      // 🆕 BUILD FULL CLAUDE MESSAGE HISTORY WITH FILES
+      // Get conversation history for context
+      const history = await conversationService.getMessages(conversationId);
+
+      // Format messages for Claude API, including file attachments
       const claudeMessages = [];
 
-      for (const msg of historyWithoutCurrent) {
+      for (const msg of history) {
         // Get files for this message
         const filesResult = await pool.query(
           'SELECT * FROM message_files WHERE message_id = $1',
@@ -218,7 +203,10 @@ router.post('/', async (req, res, next) => {
         );
         const messageFiles = filesResult.rows;
         
-        console.log(`📎 Message ${msg.id} (${msg.role}) has ${messageFiles.length} files`);
+        console.log(`📎 Message ${msg.id} has ${messageFiles.length} files`);
+        if (messageFiles.length > 0) {
+          console.log('📎 Files:', messageFiles.map(f => f.original_filename));
+        }
 
         if (messageFiles.length > 0) {
           // Message has attachments - format as multi-part content
@@ -227,8 +215,10 @@ router.post('/', async (req, res, next) => {
           // Add files first
           for (const file of messageFiles) {
             if (file.mime_type.startsWith('image/')) {
+              // Image attachment
               const fileData = await fs.readFile(file.file_path);
               const base64Data = fileData.toString('base64');
+
               contentArray.push({
                 type: 'image',
                 source: {
@@ -238,8 +228,10 @@ router.post('/', async (req, res, next) => {
                 }
               });
             } else if (file.mime_type === 'application/pdf') {
+              // PDF attachment
               const fileData = await fs.readFile(file.file_path);
               const base64Data = fileData.toString('base64');
+
               contentArray.push({
                 type: 'document',
                 source: {
@@ -249,6 +241,7 @@ router.post('/', async (req, res, next) => {
                 }
               });
             } else if (file.mime_type.startsWith('text/') || file.mime_type === 'application/json') {
+              // Text file - read and include content
               const fileContent = await fs.readFile(file.file_path, 'utf-8');
               contentArray.push({
                 type: 'text',
@@ -276,9 +269,7 @@ router.post('/', async (req, res, next) => {
         }
       }
 
-      console.log(`[API] Sending ${claudeMessages.length} messages to Claude (full history)`);
-
-      // Send to Claude with FULL conversation history
+      // Send to Claude
       const response = await claudeService.sendMessage(claudeMessages, useModel);
 
       assistantContent = response.content;
@@ -291,15 +282,14 @@ router.post('/', async (req, res, next) => {
       console.log(`[API] Claude response received (${usage.inputTokens + usage.outputTokens} tokens)`);
     }
 
-    // 🆕 SAVE ASSISTANT'S RESPONSE WITH MODEL TRACKING
+    // Save assistant's response
     const savedMessage = await conversationService.saveMessage(
       conversationId,
       'assistant',
       assistantContent,
       usage.cost,
       usage.inputTokens,
-      usage.outputTokens,
-      useModel // 🆕 Track which model generated this response
+      usage.outputTokens
     );
 
     // Get updated conversation stats
