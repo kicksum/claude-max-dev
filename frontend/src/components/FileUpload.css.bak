@@ -59,7 +59,7 @@
 .file-dropzone {
   border: 2px dashed #ddd;
   border-radius: 8px;
-  padding: 20px;
+  padding: 12px;
   text-align: center;
   transition: all 0.2s;
   background: #fafafa;
@@ -83,7 +83,7 @@
 }
 
 .dropzone-icon {
-  font-size: 32px;
+  font-size: 20px;
 }
 
 .dropzone-text {

@@ -661,3 +661,86 @@ Location: [current directory]
 ```
 
 This ensures Claude knows the rules and context! 🎯
+---
+
+## 🆕 RECENT UPDATES
+
+### v1.1.0 - Conversation Context & Model Tracking (Oct 31, 2025)
+
+**Major Features Added:**
+
+1. **Full Conversation Context** ✅
+   - Models now receive entire conversation history
+   - Multi-turn conversations work naturally
+   - AI remembers everything said in the chat
+   - No more "I don't have that information" errors
+
+2. **Model Tracking & Badges** ✅
+   - Every response shows which model generated it
+   - Visual badges: ☁️ for Claude, 🖥️ for local models
+   - Database tracks `model_used` for each message
+   - Easy to see costs per model
+
+3. **Model Persistence** ✅
+   - Model selection saves per conversation
+   - Switching conversations remembers your model choice
+   - No more resetting to default
+
+4. **UI Improvements** ✅
+   - Subtle, transparent file upload area
+   - Balanced input/upload sizing
+   - Better visual hierarchy
+
+**Database Changes:**
+```sql
+-- New column tracks which model generated each response
+ALTER TABLE messages ADD COLUMN model_used VARCHAR(100);
+CREATE INDEX idx_messages_model_used ON messages(model_used);
+
+-- Conversations now persist model selection
+-- conversations.model column is now actively used
+```
+
+**Files Modified:**
+- `backend/src/routes/messages.js` - Full conversation history logic
+- `backend/src/services/conversation.service.js` - Model tracking support
+- `frontend/src/app/page.js` - Model badges and persistence
+- `frontend/src/components/FileUpload.css` - Subtle styling
+- `database/migrations/001_add_model_tracking.sql` - Schema updates
+
+**Testing:**
+```bash
+# Test conversation context
+You: "My name is Jeff"
+AI: [responds]
+You: "What's my name?"
+AI: "Your name is Jeff" ✅
+
+# Test model persistence
+1. Select llama3:8b
+2. Send message
+3. Switch conversations
+4. Return - should still show llama3:8b ✅
+
+# Test model badges
+- Every AI response shows model badge ✅
+```
+
+**Performance Notes:**
+- Input tokens increased (2-10x for long conversations)
+- Output quality significantly improved
+- Cost impact acceptable for better responses
+- Can limit history depth if needed (see messages.js line 157)
+
+**Known Issues:**
+- None currently identified
+
+**Rollback:**
+If needed, restore from backups created during deployment:
+```bash
+cd ~/claude-max-dev/backups/[timestamp]/
+cp * ../../backend/src/routes/
+docker compose restart
+```
+
+---

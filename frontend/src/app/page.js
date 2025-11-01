@@ -862,23 +862,30 @@ useEffect(() => {
           )}
           <div ref={messagesEndRef} />
         </div>
-
         {/* Input Area */}
         <div className="bg-gray-800 border-t border-gray-700 p-4">
           <div className="max-w-[90%] mx-auto">
-            <FileUpload
-              onFilesSelected={handleFilesSelected}
-              selectedFiles={selectedFiles}
-              onRemoveFile={handleRemoveFile}
-            />
+            <div className="mb-2">
+              <FileUpload
+                onFilesSelected={handleFilesSelected}
+                selectedFiles={selectedFiles}
+                onRemoveFile={handleRemoveFile}
+              />
+            </div>
             <form onSubmit={handleSendMessage} className="flex gap-2">
-              <input
-                type="text"
+              <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage(e);
+                  }
+                }}
                 placeholder="Message Claude..."
                 disabled={loading || !activeConversation}
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                rows={3}
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 resize-none"
               />
               <button
                 type="submit"
@@ -891,6 +898,6 @@ useEffect(() => {
           </div>
         </div>
       </div>
-    </div>
+     </div>
   );
 }
